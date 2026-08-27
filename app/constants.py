@@ -88,7 +88,7 @@ SETTINGS_DEFAULTS = {
     "市場時區": "America/New_York",
     "Cloud Run URL": "",
     "Web App URL": "",
-    "系統版本": "0.2.0",
+    "系統版本": "0.2.1",
     "下次允許抓取(UTC)": "",
     "連續失敗次數": 0,
     "最後成功抓取(UTC)": "",

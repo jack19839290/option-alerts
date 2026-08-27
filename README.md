@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.2.0`
+目前版本：`0.2.1`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算警示採用價與 Greeks，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 

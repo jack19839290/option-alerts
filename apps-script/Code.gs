@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.2.0',
+  VERSION: '0.2.1',
   SHEETS: {
     DASHBOARD: '控制台',
     MONITORS: '監控清單',

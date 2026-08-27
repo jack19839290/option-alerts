@@ -15,7 +15,7 @@
 2. 重新整理 Google Sheet，從「選擇權警示」選單執行「初始化／修復系統」。
 3. 第一次執行時完成 Google 授權；這會建立每分鐘處理待寄 Email 的 Apps Script 觸發器。
 
-若先前已完成上述設定，只要確認 Apps Script 的 `APP.VERSION` 為 `0.2.0`，不需重建試算表。
+若先前已完成上述設定，只要確認 Apps Script 的 `APP.VERSION` 為 `0.2.1`，不需重建試算表。
 
 ## 1. 建立不綁計費的 Google Cloud Project
 
