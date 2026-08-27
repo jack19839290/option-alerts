@@ -13,7 +13,7 @@
 5. 儲存後執行 `setupSystem`，依畫面授權寄信、觸發器與目前試算表權限。
 6. 回到試算表，在「設定」分頁的「通知信箱」填入唯一收件信箱。
 7. 如要在獨立網頁輸入，於 Apps Script 選擇「部署 → 新部署 → 網頁應用程式」，設為「以我的身分執行」，存取者選擇自己的帳號，並把部署 URL 填入「設定 → Web App URL」。
-8. 重新整理試算表；可直接開啟 Web App，或使用上方選單「選擇權警示 → 新增／更新監控」。
+8. 重新整理試算表；可直接開啟 Web App，或使用上方選單「選擇權警示 → 新增／更新期權鍊掃描」。
 
 `setupSystem` 會建立每 1 分鐘檢查一次的 Email 觸發器。它只寄送雲端服務已標記為「待寄信」的跨越事件，不會每分鐘重複寄送。
 
@@ -59,8 +59,8 @@ gcloud scheduler jobs run option-alert-refresh --location asia-east1 --project "
 
 約一至兩分鐘後檢查：
 
-- 「監控清單」的「最後抓取時間／資料狀態／警示狀態」。
-- 對應的 `股票_到期日` 工作表是否出現行情與 Greeks。
+- 「掃描設定」的「合約數／符合數／最後抓取時間／資料狀態」。
+- 對應的 `股票_到期日` 工作表是否出現完整期權鍊、Greeks 與條件結果。
 - 「系統紀錄」是否新增成功或錯誤訊息。
 
 ## 更新既有部署
@@ -71,4 +71,4 @@ gcloud scheduler jobs run option-alert-refresh --location asia-east1 --project "
 
 - Cloud Run、Cloud Build、Artifact Registry 與 Cloud Scheduler 可能依 Google Cloud 帳戶方案產生成本。
 - Yahoo／`yfinance` 回傳不保證即時、完整或長期維持相同格式；服務會顯示錯誤並退避，但不會自行改用其他行情來源。
-- 警示以成功抓取到的 `Mid` 或備援 `Last` 判斷，網路延遲可能使通知晚於市場變動。
+- 賣出年化報酬率只使用有效 Bid；網路與排程延遲可能使通知晚於市場變動。

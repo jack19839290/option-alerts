@@ -5,11 +5,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .alerts import DISABLED, evaluate_alert
+from .alerts import DISABLED, evaluate_conditions, evaluate_contract_alert
 from .greeks import calculate_greeks, time_to_expiry_years
 from .market_clock import is_us_regular_session
-from .models import MonitorRecord
-from .pricing import select_alert_price
+from .models import ScanRecord, as_bool
+from .pricing import annualized_premium_return, calculate_mid, select_seller_price
 from .provider import MarketDataError, RateLimitError, YahooFinanceProvider
 
 
@@ -38,6 +38,50 @@ def _parse_utc(value: Any) -> datetime | None:
         return None
 
 
+def _existing_pending(value: Any) -> dict[str, Any]:
+    if not value:
+        return {"total": 0, "items": []}
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {"total": 0, "items": []}
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("items"), list):
+        return {"total": 0, "items": []}
+    return parsed
+
+
+def _merge_pending(
+    existing_value: Any, new_items: list[dict[str, Any]], generated_at: datetime
+) -> str:
+    existing = _existing_pending(existing_value)
+    combined: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*existing.get("items", []), *new_items]:
+        symbol = str(item.get("contract_symbol") or "")
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        combined.append(item)
+    if not combined:
+        return ""
+    previous_total = _as_int(existing.get("total"), len(existing.get("items", [])))
+    newly_added = sum(
+        1
+        for item in new_items
+        if str(item.get("contract_symbol") or "")
+        not in {
+            str(old.get("contract_symbol") or "")
+            for old in existing.get("items", [])
+        }
+    )
+    payload = {
+        "generated_at": generated_at.isoformat(),
+        "total": max(len(combined), previous_total + newly_added),
+        "items": combined[:20],
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 class RefreshService:
     def __init__(self, repository: Any, provider: YahooFinanceProvider | None = None):
         self.repository = repository
@@ -64,16 +108,18 @@ class RefreshService:
                 "尚未到更新時間", now, last_success + timedelta(minutes=interval_minutes)
             )
 
-        headers, monitors, invalid_rows = self.repository.load_monitors()
-        active = [monitor for monitor in monitors if monitor.enabled]
+        headers, scans, invalid_rows = self.repository.load_scans()
+        active = [scan for scan in scans if scan.enabled]
+        previous_states = self.repository.load_chain_states(active)
         updates: dict[str, dict[str, Any]] = {}
-        for monitor in monitors:
-            if not monitor.enabled:
-                updates[monitor.monitor_id] = {
+        chain_rows: dict[str, list[dict[str, Any]]] = {}
+        for scan in scans:
+            if not scan.enabled:
+                updates[scan.scan_id] = {
                     "狀態": DISABLED,
                     "資料狀態": DISABLED,
-                    "警示狀態": DISABLED,
-                    "工作表": monitor.sheet_name,
+                    "待寄信": "",
+                    "工作表": scan.sheet_name,
                 }
 
         provider = self.provider or YahooFinanceProvider(
@@ -88,11 +134,12 @@ class RefreshService:
         except RateLimitError as exc:
             return self._rate_limited(settings, now, str(exc))
 
-        groups: dict[tuple[str, object], list[MonitorRecord]] = defaultdict(list)
-        for monitor in active:
-            groups[(monitor.ticker, monitor.expiry)].append(monitor)
+        groups: dict[tuple[str, object], list[ScanRecord]] = defaultdict(list)
+        for scan in active:
+            groups[(scan.ticker, scan.expiry)].append(scan)
 
         success_count = 0
+        contract_count = 0
         error_count = len(invalid_rows)
         rate_limit_error = ""
         for (ticker, expiry), group in groups.items():
@@ -101,107 +148,196 @@ class RefreshService:
             except RateLimitError as exc:
                 rate_limit_error = str(exc)
                 error_count += len(group)
-                for monitor in group:
-                    updates[monitor.monitor_id] = self._error_update(
-                        monitor, now, "Yahoo 流量限制", str(exc)
+                for scan in group:
+                    updates[scan.scan_id] = self._error_update(
+                        scan, now, "Yahoo 流量限制", str(exc)
                     )
                 break
             except MarketDataError as exc:
                 error_count += len(group)
-                for monitor in group:
-                    updates[monitor.monitor_id] = self._error_update(
-                        monitor, now, "抓取失敗", str(exc)
+                for scan in group:
+                    updates[scan.scan_id] = self._error_update(
+                        scan, now, "抓取失敗", str(exc)
                     )
                 continue
 
-            for monitor in group:
-                quote = snapshot.find(monitor.option_type, monitor.strike)
-                if quote is None:
-                    error_count += 1
-                    updates[monitor.monitor_id] = self._error_update(
-                        monitor, now, "找不到合約", "Yahoo 期權鏈沒有此類型與履約價"
+            for scan in group:
+                fingerprint_matches = (
+                    str(scan.values.get("條件指紋") or "")
+                    == scan.condition_fingerprint
+                )
+                baseline_established = scan.baseline_established and fingerprint_matches
+                scan_states = previous_states.get(scan.scan_id, {})
+                rows: list[dict[str, Any]] = []
+                new_alerts: list[dict[str, Any]] = []
+                matching_count = 0
+                quotes = [
+                    quote
+                    for quote in snapshot.quotes
+                    if scan.display_type == "ALL" or quote.option_type == scan.display_type
+                ]
+                quotes.sort(key=lambda quote: (quote.strike, quote.option_type))
+                for quote in quotes:
+                    _, dte = time_to_expiry_years(
+                        scan.expiry, now=now, market_timezone=market_timezone
                     )
-                    continue
+                    midpoint = calculate_mid(quote.bid, quote.ask)
+                    seller_price, seller_source = select_seller_price(quote.bid)
+                    greeks = None
+                    if (
+                        snapshot.underlying_price is not None
+                        and quote.implied_volatility is not None
+                        and quote.implied_volatility > 0
+                    ):
+                        greeks = calculate_greeks(
+                            option_type=quote.option_type,
+                            spot=snapshot.underlying_price,
+                            strike=quote.strike,
+                            volatility=quote.implied_volatility,
+                            risk_free_rate=risk_free_rate,
+                            dividend_yield=snapshot.dividend_yield,
+                            expiry=scan.expiry,
+                            now=now,
+                            market_timezone=market_timezone,
+                        )
+                    capital_basis = (
+                        quote.strike if quote.option_type == "PUT" else scan.call_cost_basis
+                    )
+                    annual_return = annualized_premium_return(
+                        seller_premium=seller_price,
+                        capital_basis=capital_basis,
+                        dte=dte,
+                    )
+                    evaluation = evaluate_conditions(
+                        scan=scan,
+                        delta=greeks.delta if greeks else None,
+                        vega=greeks.vega_per_pct if greeks else None,
+                        annual_return=annual_return,
+                        open_interest=quote.open_interest,
+                    )
+                    if evaluation.matched is True:
+                        matching_count += 1
 
-                alert_price, price_source, midpoint = select_alert_price(
-                    quote.bid, quote.ask, quote.last_price
-                )
-                greeks = None
-                if (
-                    snapshot.underlying_price is not None
-                    and quote.implied_volatility is not None
-                    and quote.implied_volatility > 0
-                ):
-                    greeks = calculate_greeks(
-                        option_type=monitor.option_type,
-                        spot=snapshot.underlying_price,
-                        strike=monitor.strike,
-                        volatility=quote.implied_volatility,
-                        risk_free_rate=risk_free_rate,
-                        dividend_yield=snapshot.dividend_yield,
-                        expiry=monitor.expiry,
-                        now=now,
-                        market_timezone=market_timezone,
+                    previous = scan_states.get(quote.contract_symbol, {})
+                    armed_value = previous.get("可再次通知")
+                    previous_armed = (
+                        as_bool(armed_value) if armed_value not in (None, "") else None
                     )
-                _, dte = time_to_expiry_years(
-                    monitor.expiry, now=now, market_timezone=market_timezone
-                )
-                previous_state = str(
-                    monitor.values.get("上次警示狀態")
-                    or monitor.values.get("警示狀態")
-                    or "正常"
-                )
-                decision = evaluate_alert(
-                    price=alert_price,
-                    low_threshold=monitor.low_threshold,
-                    high_threshold=monitor.high_threshold,
-                    previous_state=previous_state,
-                    email_enabled=monitor.email_enabled,
-                    hysteresis=_as_float(settings.get("警示回復緩衝"), 0.02),
-                )
-                existing_pending = str(monitor.values.get("待寄信") or "").strip()
-                data_status = "正常" if alert_price is not None else "報價不足"
-                if greeks is None:
-                    data_status = (
-                        data_status + "；Greeks資料不足"
-                        if data_status != "正常"
-                        else "Greeks資料不足"
+                    alert = evaluate_contract_alert(
+                        evaluation=evaluation,
+                        baseline_established=baseline_established,
+                        previous_armed=previous_armed,
+                        previous_nonmatches=_as_int(
+                            previous.get("連續有效不符合"), 0
+                        ),
+                        email_enabled=scan.email_enabled,
                     )
-                updates[monitor.monitor_id] = {
-                    "狀態": "監控中",
-                    "合約代號": quote.contract_symbol,
-                    "標的股價": snapshot.underlying_price or "",
-                    "Last": quote.last_price or "",
-                    "Bid": quote.bid or "",
-                    "Ask": quote.ask or "",
-                    "Mid": midpoint or "",
-                    "警示採用價": alert_price or "",
-                    "價格來源": price_source,
-                    "IV": quote.implied_volatility or "",
-                    "無風險利率": risk_free_rate,
-                    "股息殖利率": snapshot.dividend_yield,
-                    "Greeks模型": "Black-Scholes-Merton (估算)",
-                    "Delta估算": greeks.delta if greeks else "",
-                    "Vega估算(每1%)": greeks.vega_per_pct if greeks else "",
-                    "Theta估算(每日)": greeks.theta_per_day if greeks else "",
-                    "DTE": greeks.dte if greeks else dte,
-                    "成交量": quote.volume if quote.volume is not None else "",
-                    "未平倉": quote.open_interest if quote.open_interest is not None else "",
-                    "最後成交時間": quote.last_trade_time.isoformat()
-                    if quote.last_trade_time
-                    else "",
-                    "最後抓取時間": now.isoformat(),
-                    "資料狀態": data_status,
-                    "警示狀態": decision.state,
-                    "待寄信": existing_pending or decision.pending_email,
-                    "上次警示狀態": decision.state,
+                    if not evaluation.has_active_conditions:
+                        overall_result = "尚未設定條件"
+                    elif evaluation.matched is None:
+                        overall_result = "資料不足"
+                    else:
+                        overall_result = "符合" if evaluation.matched else "未符合"
+
+                    data_issues: list[str] = []
+                    if snapshot.underlying_price is None:
+                        data_issues.append("標的股價不足")
+                    if seller_price is None:
+                        data_issues.append("Bid無效")
+                    if greeks is None:
+                        data_issues.append("Greeks資料不足")
+                    if quote.open_interest is None:
+                        data_issues.append("未平倉資料不足")
+                    if (
+                        quote.option_type == "CALL"
+                        and scan.call_cost_basis is None
+                        and scan.annual_return_threshold is not None
+                    ):
+                        data_issues.append("CALL未填持股成本")
+
+                    row = {
+                        "掃描ID": scan.scan_id,
+                        "類型": quote.option_type,
+                        "履約價": quote.strike,
+                        "合約代號": quote.contract_symbol,
+                        "標的股價": snapshot.underlying_price,
+                        "Last": quote.last_price,
+                        "Bid": quote.bid,
+                        "Ask": quote.ask,
+                        "Mid": midpoint,
+                        "賣出試算價": seller_price,
+                        "試算價來源": seller_source,
+                        "IV": quote.implied_volatility,
+                        "無風險利率": risk_free_rate,
+                        "股息殖利率": snapshot.dividend_yield,
+                        "Greeks模型": "Black-Scholes-Merton (估算)",
+                        "Delta估算": greeks.delta if greeks else None,
+                        "|Delta|": abs(greeks.delta) if greeks else None,
+                        "Vega估算(每1%)": greeks.vega_per_pct if greeks else None,
+                        "Theta估算(每日)": greeks.theta_per_day if greeks else None,
+                        "DTE": dte,
+                        "年化報酬率": annual_return,
+                        "年化本金": capital_basis,
+                        "成交量": quote.volume,
+                        "未平倉": quote.open_interest,
+                        "Delta條件結果": evaluation.delta_result,
+                        "Vega條件結果": evaluation.vega_result,
+                        "年化報酬率條件結果": evaluation.annual_return_result,
+                        "未平倉條件結果": evaluation.open_interest_result,
+                        "全部條件符合": overall_result,
+                        "通知狀態": alert.status,
+                        "可再次通知": alert.armed,
+                        "連續有效不符合": alert.consecutive_nonmatches,
+                        "待寄信": "新符合" if alert.pending_email else "",
+                        "最後成交時間": quote.last_trade_time,
+                        "最後抓取時間": now,
+                        "資料狀態": "；".join(data_issues) if data_issues else "正常",
+                    }
+                    rows.append(row)
+                    if alert.pending_email:
+                        new_alerts.append(
+                            {
+                                "contract_symbol": quote.contract_symbol,
+                                "option_type": quote.option_type,
+                                "strike": quote.strike,
+                                "bid": seller_price,
+                                "delta": greeks.delta if greeks else None,
+                                "vega": greeks.vega_per_pct if greeks else None,
+                                "annual_return": annual_return,
+                                "open_interest": quote.open_interest,
+                                "dte": dte,
+                                "last_fetch": now.isoformat(),
+                            }
+                        )
+
+                chain_rows[scan.scan_id] = rows
+                pending_email = _merge_pending(
+                    scan.values.get("待寄信"), new_alerts, now
+                )
+                if not quotes:
+                    scan_data_status = "期權鍊無資料"
+                elif any(row["資料狀態"] != "正常" for row in rows):
+                    scan_data_status = "部分資料不足"
+                else:
+                    scan_data_status = "正常"
+                updates[scan.scan_id] = {
+                    "狀態": "掃描中" if scan.has_active_conditions else "僅顯示期權鍊",
+                    "標的股價": snapshot.underlying_price,
+                    "合約數": len(rows),
+                    "符合數": matching_count,
+                    "最後抓取時間": now,
+                    "資料狀態": scan_data_status,
+                    "待寄信": pending_email,
                     "錯誤訊息": "",
-                    "工作表": monitor.sheet_name,
+                    "工作表": scan.sheet_name,
+                    "已建立基準": True,
+                    "條件指紋": scan.condition_fingerprint,
                 }
                 success_count += 1
+                contract_count += len(rows)
 
-        self.repository.update_monitor_outputs(headers, monitors, updates)
-        self.repository.write_contract_sheets(monitors, updates)
+        self.repository.update_scan_outputs(headers, scans, updates)
+        self.repository.write_chain_sheets(scans, chain_rows)
 
         if rate_limit_error:
             return self._rate_limited(settings, now, rate_limit_error, already_written=True)
@@ -221,7 +357,8 @@ class RefreshService:
             status,
             json.dumps(
                 {
-                    "success": success_count,
+                    "scans": success_count,
+                    "contracts": contract_count,
                     "errors": error_count,
                     "invalid_rows": invalid_rows,
                     "market_open": is_open,
@@ -231,22 +368,22 @@ class RefreshService:
         )
         return {
             "status": status,
-            "success": success_count,
+            "scans": success_count,
+            "contracts": contract_count,
             "errors": error_count,
             "invalid_rows": invalid_rows,
             "market_open": is_open,
         }
 
     def _error_update(
-        self, monitor: MonitorRecord, now: datetime, status: str, message: str
+        self, scan: ScanRecord, now: datetime, status: str, message: str
     ) -> dict[str, Any]:
         return {
             "狀態": "錯誤",
-            "最後抓取時間": now.isoformat(),
+            "最後抓取時間": now,
             "資料狀態": status,
-            "警示狀態": "資料不足",
             "錯誤訊息": message[:1000],
-            "工作表": monitor.sheet_name,
+            "工作表": scan.sheet_name,
         }
 
     def _rate_limited(

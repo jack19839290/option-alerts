@@ -1,7 +1,7 @@
 import unittest
 
-from app.constants import MONITOR_HEADERS
-from app.models import MonitorRecord, parse_sheet_date
+from app.constants import SCAN_HEADERS
+from app.models import ScanRecord, parse_sheet_date
 
 
 class ModelTests(unittest.TestCase):
@@ -9,28 +9,40 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(parse_sheet_date("2027/1/15").isoformat(), "2027-01-15")
         self.assertEqual(parse_sheet_date(46402.5).isoformat(), "2027-01-15")
 
-    def test_monitor_parsing_and_id(self):
+    def test_scan_parsing_and_id(self):
         row = [
             True,
             "",
             "mu",
             "2027-01-15",
-            "put",
-            55,
-            2.5,
-            4.0,
+            "all",
+            "≥",
+            0.2,
+            "≤",
+            0.5,
+            "≥",
+            0.15,
+            60,
+            100,
             True,
             "測試",
         ]
-        monitor = MonitorRecord.from_values(2, MONITOR_HEADERS, row)
-        self.assertEqual(monitor.monitor_id, "MU|2027-01-15|PUT|55")
-        self.assertEqual(monitor.sheet_name, "MU_2027-01-15")
-        self.assertEqual(monitor.low_threshold, 2.5)
+        scan = ScanRecord.from_values(2, SCAN_HEADERS, row)
+        self.assertEqual(scan.scan_id, "MU|2027-01-15")
+        self.assertEqual(scan.sheet_name, "MU_2027-01-15")
+        self.assertEqual(scan.delta_threshold, 0.2)
+        self.assertTrue(scan.has_active_conditions)
+        self.assertEqual(len(scan.condition_fingerprint), 16)
 
-    def test_invalid_option_type(self):
-        row = [True, "", "MU", "2027-01-15", "X", 55]
-        with self.assertRaisesRegex(ValueError, "CALL 或 PUT"):
-            MonitorRecord.from_values(2, MONITOR_HEADERS, row)
+    def test_condition_operator_and_threshold_must_be_paired(self):
+        row = [True, "", "MU", "2027-01-15", "ALL", "≥", ""]
+        with self.assertRaisesRegex(ValueError, "同時填寫"):
+            ScanRecord.from_values(2, SCAN_HEADERS, row)
+
+    def test_blank_conditions_are_allowed(self):
+        row = [True, "", "MU", "2027-01-15", "ALL"]
+        scan = ScanRecord.from_values(2, SCAN_HEADERS, row)
+        self.assertFalse(scan.has_active_conditions)
 
 
 if __name__ == "__main__":

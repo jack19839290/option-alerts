@@ -1,44 +1,107 @@
 from __future__ import annotations
 
-from .models import AlertDecision
+from .models import ConditionEvaluation, ContractAlertDecision, ScanRecord
 
 
-NORMAL = "正常"
-HIGH = "高於上限"
-LOW = "低於下限"
-INSUFFICIENT = "資料不足"
 DISABLED = "停用"
+MATCHED = "符合"
+NOT_MATCHED = "未符合"
+NO_CONDITIONS = "尚未設定條件"
+INSUFFICIENT = "資料不足"
 
 
-def evaluate_alert(
+def _condition_result(
+    value: float | int | None, operator: str, threshold: float | None
+) -> tuple[str, bool, bool]:
+    if threshold is None:
+        return "未設定", True, True
+    if value is None:
+        return INSUFFICIENT, False, False
+    if operator == "≥":
+        passed = value >= threshold
+    elif operator == "≤":
+        passed = value <= threshold
+    else:
+        return INSUFFICIENT, False, False
+    return ("通過" if passed else "未通過"), passed, True
+
+
+def evaluate_conditions(
     *,
-    price: float | None,
-    low_threshold: float | None,
-    high_threshold: float | None,
-    previous_state: str,
+    scan: ScanRecord,
+    delta: float | None,
+    vega: float | None,
+    annual_return: float | None,
+    open_interest: int | None,
+) -> ConditionEvaluation:
+    delta_result = _condition_result(
+        abs(delta) if delta is not None else None,
+        scan.delta_operator,
+        scan.delta_threshold,
+    )
+    vega_result = _condition_result(vega, scan.vega_operator, scan.vega_threshold)
+    annual_result = _condition_result(
+        annual_return,
+        scan.annual_return_operator,
+        scan.annual_return_threshold,
+    )
+    if scan.open_interest_min is None:
+        open_interest_result = ("未設定", True, True)
+    elif open_interest is None:
+        open_interest_result = (INSUFFICIENT, False, False)
+    else:
+        passed = open_interest > scan.open_interest_min
+        open_interest_result = ("通過" if passed else "未通過", passed, True)
+
+    results = (delta_result, vega_result, annual_result, open_interest_result)
+    if not scan.has_active_conditions:
+        matched: bool | None = False
+    elif not all(result[2] for result in results):
+        matched = None
+    else:
+        matched = all(result[1] for result in results)
+    return ConditionEvaluation(
+        has_active_conditions=scan.has_active_conditions,
+        matched=matched,
+        delta_result=delta_result[0],
+        vega_result=vega_result[0],
+        annual_return_result=annual_result[0],
+        open_interest_result=open_interest_result[0],
+    )
+
+
+def evaluate_contract_alert(
+    *,
+    evaluation: ConditionEvaluation,
+    baseline_established: bool,
+    previous_armed: bool | None,
+    previous_nonmatches: int,
     email_enabled: bool,
-    hysteresis: float = 0.02,
-) -> AlertDecision:
-    if price is None:
-        return AlertDecision(INSUFFICIENT, "")
-
-    previous_state = previous_state or NORMAL
-    hysteresis = max(0.0, hysteresis)
-
-    if previous_state == HIGH and high_threshold is not None:
-        if price > high_threshold * (1.0 - hysteresis):
-            return AlertDecision(HIGH, "")
-        previous_state = NORMAL
-    elif previous_state == LOW and low_threshold is not None:
-        if price < low_threshold * (1.0 + hysteresis):
-            return AlertDecision(LOW, "")
-        previous_state = NORMAL
-
-    if high_threshold is not None and price >= high_threshold:
-        pending = HIGH if email_enabled and previous_state != HIGH else ""
-        return AlertDecision(HIGH, pending)
-    if low_threshold is not None and price <= low_threshold:
-        pending = LOW if email_enabled and previous_state != LOW else ""
-        return AlertDecision(LOW, pending)
-    return AlertDecision(NORMAL, "", rearmed=previous_state in {HIGH, LOW})
-
+) -> ContractAlertDecision:
+    if not evaluation.has_active_conditions:
+        return ContractAlertDecision(NO_CONDITIONS, True, 0, False)
+    if evaluation.matched is None:
+        return ContractAlertDecision(
+            INSUFFICIENT,
+            True if previous_armed is None else previous_armed,
+            max(0, previous_nonmatches),
+            False,
+        )
+    if not baseline_established:
+        return ContractAlertDecision(
+            "初次基準",
+            not evaluation.matched,
+            0 if evaluation.matched else 1,
+            False,
+        )
+    if evaluation.matched:
+        armed = True if previous_armed is None else previous_armed
+        return ContractAlertDecision(
+            "新符合" if armed else "持續符合",
+            False,
+            0,
+            bool(armed and email_enabled),
+        )
+    count = max(0, previous_nonmatches) + 1
+    armed = bool(previous_armed) or count >= 2
+    return ContractAlertDecision(NOT_MATCHED, armed, count, False)

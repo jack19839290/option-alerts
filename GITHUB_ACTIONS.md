@@ -15,7 +15,7 @@
 2. 重新整理 Google Sheet，從「選擇權警示」選單執行「初始化／修復系統」。
 3. 第一次執行時完成 Google 授權；這會建立每分鐘處理待寄 Email 的 Apps Script 觸發器。
 
-若先前已完成上述設定，只要確認 Apps Script 的 `APP.VERSION` 為 `0.2.1`，不需重建試算表。
+若是全新安裝，請確認 Apps Script 的 `APP.VERSION` 為 `0.3.0`。若從 0.2.1 升級，請依本文最後的升級連結操作。
 
 ## 1. 建立不綁計費的 Google Cloud Project
 
@@ -55,7 +55,8 @@ Google Sheets API 的標準用量不需要額外付費，也不需要啟用 Clou
 4. 等待綠色勾號後，回到 Google Sheet 檢查：
 
    - 「設定」的最後執行與狀態。
-   - 「監控清單」的價格、Greeks 與資料狀態。
+   - 「掃描設定」的合約數、符合數與資料狀態。
+   - 對應的 `股票_到期日` 工作表是否列出完整期權鍊與條件結果。
    - 「系統紀錄」的新紀錄。
 
 若出現 `PERMISSION_DENIED`，通常是尚未把 Sheet 分享給服務帳戶，或分享的 Email 與 JSON 內的 `client_email` 不一致。
@@ -66,3 +67,7 @@ Google Sheets API 的標準用量不需要額外付費，也不需要啟用 Clou
 - GitHub 公開 repository 若連續 60 天沒有活動，排程可能自動停用；屆時可在 Actions 頁面重新啟用。
 - `GOOGLE_CREDENTIALS` 是長期金鑰。若懷疑外洩，立即在 Google Cloud Console 刪除該金鑰並建立新金鑰。
 - 不要在 workflow 中輸出 secret，也不要把 `gha-creds-*.json` 加入版本控制。
+
+## 從 0.2.1 升級
+
+既有使用者不需重建 Secrets 或服務帳戶。請依 [UPGRADE_0.3.md](UPGRADE_0.3.md) 更新 Apps Script、執行 `setupSystem`，再重新執行一次 workflow。

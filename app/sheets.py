@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from .constants import (
-    CONTRACT_HEADERS,
-    MONITOR_HEADERS,
-    MONITOR_SHEET,
-    OUTPUT_HEADERS,
+    CHAIN_HEADERS,
+    SCAN_HEADERS,
+    SCAN_OUTPUT_HEADERS,
+    SCAN_SHEET,
     SETTINGS_DEFAULTS,
     SETTINGS_SHEET,
     SYSTEM_LOG_SHEET,
 )
-from .models import MonitorRecord
+from .models import ScanRecord
 
 
 def _column_name(index: int) -> str:
@@ -86,14 +86,14 @@ class SheetsRepository:
                 body={"valueInputOption": "USER_ENTERED", "data": ranges},
             ).execute()
 
-    def load_monitors(self) -> tuple[list[str], list[MonitorRecord], list[dict[str, Any]]]:
-        end_col = _column_name(len(MONITOR_HEADERS))
+    def load_scans(self) -> tuple[list[str], list[ScanRecord], list[dict[str, Any]]]:
+        end_col = _column_name(len(SCAN_HEADERS))
         response = (
             self.service.spreadsheets()
             .values()
             .get(
                 spreadsheetId=self.spreadsheet_id,
-                range=_sheet_range(MONITOR_SHEET, f"A1:{end_col}{self.max_monitor_rows}"),
+                range=_sheet_range(SCAN_SHEET, f"A1:{end_col}{self.max_monitor_rows}"),
                 valueRenderOption="UNFORMATTED_VALUE",
                 dateTimeRenderOption="FORMATTED_STRING",
             )
@@ -101,47 +101,87 @@ class SheetsRepository:
         )
         values = response.get("values", [])
         if not values:
-            raise RuntimeError("監控清單缺少標題列")
+            raise RuntimeError("掃描設定缺少標題列")
         headers = [str(value) for value in values[0]]
-        missing = [header for header in MONITOR_HEADERS if header not in headers]
+        missing = [header for header in SCAN_HEADERS if header not in headers]
         if missing:
-            raise RuntimeError(f"監控清單缺少欄位: {', '.join(missing)}")
+            raise RuntimeError(f"掃描設定缺少欄位: {', '.join(missing)}")
 
-        monitors: list[MonitorRecord] = []
+        scans: list[ScanRecord] = []
         invalid: list[dict[str, Any]] = []
         for row_number, row in enumerate(values[1:], start=2):
             if not any(str(value).strip() for value in row):
                 continue
             try:
-                monitors.append(MonitorRecord.from_values(row_number, headers, row))
+                scans.append(ScanRecord.from_values(row_number, headers, row))
             except ValueError as exc:
                 invalid.append({"row_number": row_number, "error": str(exc)})
-        return headers, monitors, invalid
+        return headers, scans, invalid
 
-    def update_monitor_outputs(
+    def load_chain_states(
+        self, scans: list[ScanRecord]
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        if not scans:
+            return {}
+        self._ensure_sheets([scan.sheet_name for scan in scans])
+        end_col = _column_name(len(CHAIN_HEADERS))
+        ranges = [
+            _sheet_range(scan.sheet_name, f"A1:{end_col}{self.max_monitor_rows}")
+            for scan in scans
+        ]
+        response = (
+            self.service.spreadsheets()
+            .values()
+            .batchGet(
+                spreadsheetId=self.spreadsheet_id,
+                ranges=ranges,
+                valueRenderOption="UNFORMATTED_VALUE",
+                dateTimeRenderOption="FORMATTED_STRING",
+            )
+            .execute()
+        )
+        result: dict[str, dict[str, dict[str, Any]]] = {}
+        value_ranges = response.get("valueRanges", [])
+        for scan, value_range in zip(scans, value_ranges):
+            values = value_range.get("values", [])
+            states: dict[str, dict[str, Any]] = {}
+            if values:
+                headers = [str(value) for value in values[0]]
+                for row in values[1:]:
+                    padded = row + [""] * max(0, len(headers) - len(row))
+                    mapped = dict(zip(headers, padded))
+                    symbol = str(mapped.get("合約代號") or "").strip()
+                    if symbol and str(mapped.get("掃描ID") or "") == scan.scan_id:
+                        states[symbol] = mapped
+            result[scan.scan_id] = states
+        return result
+
+    def update_scan_outputs(
         self,
         headers: list[str],
-        monitors: list[MonitorRecord],
+        scans: list[ScanRecord],
         updates: dict[str, dict[str, Any]],
     ) -> None:
-        if not monitors:
+        if not scans:
             return
-        output_start = headers.index(OUTPUT_HEADERS[0]) + 1
-        output_end = output_start + len(OUTPUT_HEADERS) - 1
+        output_start = headers.index(SCAN_OUTPUT_HEADERS[0]) + 1
+        output_end = output_start + len(SCAN_OUTPUT_HEADERS) - 1
         data = []
-        for monitor in monitors:
-            row_update = updates.get(monitor.monitor_id)
+        for scan in scans:
+            row_update = updates.get(scan.scan_id)
             if row_update is None:
                 continue
-            merged = dict(monitor.values)
+            merged = dict(scan.values)
             merged.update(row_update)
-            row_values = [[self._serializable(merged.get(header, "")) for header in OUTPUT_HEADERS]]
+            row_values = [
+                [self._serializable(merged.get(header, "")) for header in SCAN_OUTPUT_HEADERS]
+            ]
             data.append(
                 {
                     "range": _sheet_range(
-                        MONITOR_SHEET,
-                        f"{_column_name(output_start)}{monitor.row_number}:"
-                        f"{_column_name(output_end)}{monitor.row_number}",
+                        SCAN_SHEET,
+                        f"{_column_name(output_start)}{scan.row_number}:"
+                        f"{_column_name(output_end)}{scan.row_number}",
                     ),
                     "values": row_values,
                 }
@@ -152,54 +192,41 @@ class SheetsRepository:
                 body={"valueInputOption": "USER_ENTERED", "data": data},
             ).execute()
 
-    def write_contract_sheets(
+    def write_chain_sheets(
         self,
-        monitors: list[MonitorRecord],
-        updates: dict[str, dict[str, Any]],
+        scans: list[ScanRecord],
+        chain_rows: dict[str, list[dict[str, Any]]],
     ) -> None:
-        grouped: dict[str, list[MonitorRecord]] = {}
-        for monitor in monitors:
-            grouped.setdefault(monitor.sheet_name, []).append(monitor)
-        self._ensure_sheets(list(grouped))
-
+        targets = [scan for scan in scans if scan.scan_id in chain_rows]
+        if not targets:
+            return
+        self._ensure_sheets([scan.sheet_name for scan in targets])
         data: list[dict[str, Any]] = []
         clear_ranges: list[str] = []
-        for sheet_name, sheet_monitors in grouped.items():
-            rows = [CONTRACT_HEADERS]
-            for monitor in sorted(
-                sheet_monitors, key=lambda item: (item.strike, item.option_type)
-            ):
-                merged = dict(monitor.values)
-                merged.update(updates.get(monitor.monitor_id, {}))
-                merged["監控ID"] = monitor.monitor_id
-                merged["啟用"] = monitor.enabled
-                merged["類型"] = monitor.option_type
-                merged["履約價"] = monitor.strike
-                merged["低於警示"] = monitor.low_threshold or ""
-                merged["高於警示"] = monitor.high_threshold or ""
+        end_col = _column_name(len(CHAIN_HEADERS))
+        for scan in targets:
+            rows = [CHAIN_HEADERS]
+            for values in chain_rows[scan.scan_id]:
                 rows.append(
-                    [self._serializable(merged.get(header, "")) for header in CONTRACT_HEADERS]
+                    [self._serializable(values.get(header, "")) for header in CHAIN_HEADERS]
                 )
-            end_col = _column_name(len(CONTRACT_HEADERS))
             clear_ranges.append(
-                _sheet_range(sheet_name, f"A2:{end_col}{self.max_monitor_rows}")
+                _sheet_range(scan.sheet_name, f"A2:{end_col}{self.max_monitor_rows}")
             )
             data.append(
                 {
-                    "range": _sheet_range(sheet_name, f"A1:{end_col}{len(rows)}"),
+                    "range": _sheet_range(scan.sheet_name, f"A1:{end_col}{len(rows)}"),
                     "values": rows,
                 }
             )
-        if clear_ranges:
-            self.service.spreadsheets().values().batchClear(
-                spreadsheetId=self.spreadsheet_id,
-                body={"ranges": clear_ranges},
-            ).execute()
-        if data:
-            self.service.spreadsheets().values().batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
-                body={"valueInputOption": "USER_ENTERED", "data": data},
-            ).execute()
+        self.service.spreadsheets().values().batchClear(
+            spreadsheetId=self.spreadsheet_id,
+            body={"ranges": clear_ranges},
+        ).execute()
+        self.service.spreadsheets().values().batchUpdate(
+            spreadsheetId=self.spreadsheet_id,
+            body={"valueInputOption": "USER_ENTERED", "data": data},
+        ).execute()
 
     def append_system_log(self, level: str, message: str, details: str = "") -> None:
         self.service.spreadsheets().values().append(
@@ -235,7 +262,7 @@ class SheetsRepository:
                     }
                 }
             }
-            for title in titles
+            for title in dict.fromkeys(titles)
             if title not in existing
         ]
         if requests:
@@ -247,6 +274,6 @@ class SheetsRepository:
     def _serializable(value: Any) -> Any:
         if value is None:
             return ""
-        if isinstance(value, datetime):
+        if isinstance(value, (datetime, date)):
             return value.isoformat()
         return value

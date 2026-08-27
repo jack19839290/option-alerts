@@ -6,61 +6,88 @@
     <style>
       :root { color-scheme: light; font-family: Arial, "Noto Sans TC", sans-serif; }
       body { margin: 0; background: #f8fafc; color: #111827; }
-      main { max-width: 620px; margin: 0 auto; padding: 24px; }
+      main { max-width: 720px; margin: 0 auto; padding: 22px; }
       h1 { margin: 0 0 6px; font-size: 24px; }
-      .sub { margin: 0 0 22px; color: #64748b; line-height: 1.5; }
-      form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: white; padding: 22px; border: 1px solid #e5e7eb; border-radius: 12px; }
+      .sub { margin: 0 0 18px; color: #64748b; line-height: 1.55; }
+      form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; background: white; padding: 20px; border: 1px solid #e5e7eb; border-radius: 12px; }
       label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
       .full { grid-column: 1 / -1; }
+      .condition { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 8px; }
       input, select, textarea { box-sizing: border-box; width: 100%; padding: 10px 11px; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; background: white; }
       input:focus, select:focus, textarea:focus { outline: 2px solid #93c5fd; border-color: #2563eb; }
-      textarea { min-height: 72px; resize: vertical; }
+      textarea { min-height: 64px; resize: vertical; }
       .check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
       .check input { width: auto; }
+      .notice { grid-column: 1 / -1; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e40af; font-size: 12px; line-height: 1.5; }
       button { grid-column: 1 / -1; border: 0; border-radius: 8px; padding: 11px 16px; background: #2563eb; color: white; font-weight: 700; cursor: pointer; }
       button:disabled { background: #94a3b8; cursor: wait; }
       #status { grid-column: 1 / -1; min-height: 22px; padding: 9px 11px; border-radius: 7px; display: none; }
       #status.ok { display: block; background: #dcfce7; color: #166534; }
       #status.error { display: block; background: #fee2e2; color: #991b1b; }
-      .hint { color: #64748b; font-size: 12px; font-weight: 400; }
-      @media (max-width: 560px) { form { grid-template-columns: 1fr; } .full { grid-column: 1; } button, #status { grid-column: 1; } }
+      .hint { color: #64748b; font-size: 12px; font-weight: 400; line-height: 1.35; }
+      @media (max-width: 560px) {
+        form { grid-template-columns: 1fr; }
+        .full, button, #status, .notice { grid-column: 1; }
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>選擇權警示設定</h1>
-      <p class="sub">一個股票＋一個到期日會建立一張工作表；相同合約再次送出時更新原設定。</p>
-      <form id="monitorForm">
+      <h1>期權鍊掃描設定</h1>
+      <p class="sub">輸入股票與到期日後，系統會顯示 Yahoo 回傳的全部履約價。條件都可留空；所有已設定條件同時成立才會通知。</p>
+      <form id="scanForm">
         <label>股票代號
           <input name="ticker" required maxlength="15" placeholder="MU" autocomplete="off">
         </label>
         <label>到期日
           <input name="expiry" type="date" required>
         </label>
-        <label>類型
-          <select name="optionType"><option>CALL</option><option>PUT</option></select>
+        <label class="full">顯示類型
+          <select name="displayType">
+            <option value="ALL">全部 CALL＋PUT</option>
+            <option value="CALL">只顯示 CALL</option>
+            <option value="PUT">只顯示 PUT</option>
+          </select>
         </label>
-        <label>履約價
-          <input name="strike" type="number" min="0.0001" step="0.0001" required placeholder="55">
+
+        <label>|Delta| 絕對值條件
+          <span class="condition">
+            <select name="deltaOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select>
+            <input name="deltaThreshold" type="number" min="0" max="1" step="0.0001" placeholder="例如 0.30">
+          </span>
         </label>
-        <label>低於警示價
-          <input name="lowThreshold" type="number" min="0.0001" step="0.0001" placeholder="2.50">
-          <span class="hint">可留空</span>
+        <label>Vega 條件（每 1% IV）
+          <span class="condition">
+            <select name="vegaOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select>
+            <input name="vegaThreshold" type="number" min="0" step="0.0001" placeholder="例如 0.10">
+          </span>
         </label>
-        <label>高於警示價
-          <input name="highThreshold" type="number" min="0.0001" step="0.0001" placeholder="4.00">
-          <span class="hint">可留空</span>
+        <label>年化報酬率條件
+          <span class="condition">
+            <select name="annualReturnOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select>
+            <input name="annualReturnThreshold" type="number" min="0" step="0.01" placeholder="例如 20 代表 20%">
+          </span>
+          <span class="hint">輸入百分比數字；PUT 本金為履約價。</span>
         </label>
-        <label class="check full"><input name="emailEnabled" type="checkbox" checked>啟用 Email 通知</label>
+        <label>CALL 持股成本
+          <input name="callCostBasis" type="number" min="0.0001" step="0.0001" placeholder="例如 60">
+          <span class="hint">只有 CALL 年化報酬率會使用；未填則 CALL 年化留白。</span>
+        </label>
+        <label>未平倉量大於多少口
+          <input name="openInterestMin" type="number" min="0" step="1" placeholder="例如 100">
+          <span class="hint">採嚴格大於；Yahoo 缺值時視為不符合。</span>
+        </label>
+        <label class="check"><input name="emailEnabled" type="checkbox" checked>啟用 Email 通知</label>
         <label class="full">備註
           <textarea name="note" maxlength="500" placeholder="選填"></textarea>
         </label>
-        <button id="submitButton" type="submit">儲存監控</button>
+        <div class="notice">第一次成功掃描只建立基準，不寄信。之後只有從不符合轉為符合的新合約才通知；同一輪的多個履約價會合併成一封信。</div>
+        <button id="submitButton" type="submit">儲存期權鍊掃描</button>
         <div id="status"></div>
       </form>
     </main>
     <script>
-      const form = document.getElementById('monitorForm');
+      const form = document.getElementById('scanForm');
       const button = document.getElementById('submitButton');
       const statusBox = document.getElementById('status');
 
@@ -74,7 +101,7 @@
         google.script.run
           .withSuccessHandler(result => {
             button.disabled = false;
-            statusBox.textContent = `${result.message}：${result.monitorId}，工作表 ${result.sheetName}`;
+            statusBox.textContent = `${result.message}：${result.scanId}，工作表 ${result.sheetName}`;
             statusBox.className = 'ok';
           })
           .withFailureHandler(error => {
@@ -82,9 +109,8 @@
             statusBox.textContent = error && error.message ? error.message : String(error);
             statusBox.className = 'error';
           })
-          .submitMonitor(data);
+          .submitScan(data);
       });
     </script>
   </body>
 </html>
-

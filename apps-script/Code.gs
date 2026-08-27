@@ -1,34 +1,41 @@
 const APP = Object.freeze({
-  VERSION: '0.2.1',
+  VERSION: '0.3.0',
   SHEETS: {
     DASHBOARD: '控制台',
-    MONITORS: '監控清單',
+    SCANS: '掃描設定',
+    LEGACY_MONITORS: '監控清單',
     SETTINGS: '設定',
     ALERTS: '警示紀錄',
     SYSTEM: '系統紀錄',
   },
-  MONITOR_HEADERS: [
-    '啟用', '監控ID', '股票代號', '到期日', '類型', '履約價', '低於警示', '高於警示',
-    'Email通知', '備註', '狀態', '合約代號', '標的股價', 'Last', 'Bid', 'Ask', 'Mid',
-    '警示採用價', '價格來源', 'IV', 'Delta估算', 'Vega估算(每1%)', 'Theta估算(每日)',
-    'DTE', '成交量', '未平倉', '最後成交時間', '最後抓取時間', '資料狀態', '警示狀態',
-    '待寄信', '最後通知時間', '上次警示狀態', '錯誤訊息', '工作表'
+  SCAN_HEADERS: [
+    '啟用', '掃描ID', '股票代號', '到期日', '顯示類型', 'Delta條件', 'Delta門檻',
+    'Vega條件', 'Vega門檻', '年化報酬率條件', '年化報酬率門檻', 'CALL持股成本',
+    '未平倉大於(口)', 'Email通知', '備註', '狀態', '標的股價', '合約數', '符合數',
+    '最後抓取時間', '資料狀態', '待寄信', '最後通知時間', '錯誤訊息', '工作表',
+    '已建立基準', '條件指紋'
   ],
-  CONTRACT_HEADERS: [
-    '監控ID', '啟用', '類型', '履約價', '合約代號', '標的股價', 'Last', 'Bid', 'Ask', 'Mid',
-    '警示採用價', '價格來源', '低於警示', '高於警示', 'IV', '無風險利率',
-    '股息殖利率', 'Greeks模型', 'Delta估算', 'Vega估算(每1%)', 'Theta估算(每日)',
-    'DTE', '成交量', '未平倉', '最後成交時間', '最後抓取時間', '資料狀態', '警示狀態'
+  CHAIN_HEADERS: [
+    '掃描ID', '類型', '履約價', '合約代號', '標的股價', 'Last', 'Bid', 'Ask', 'Mid',
+    '賣出試算價', '試算價來源', 'IV', '無風險利率', '股息殖利率', 'Greeks模型',
+    'Delta估算', '|Delta|', 'Vega估算(每1%)', 'Theta估算(每日)', 'DTE', '年化報酬率',
+    '年化本金', '成交量', '未平倉', 'Delta條件結果', 'Vega條件結果',
+    '年化報酬率條件結果', '未平倉條件結果', '全部條件符合', '通知狀態',
+    '可再次通知', '連續有效不符合', '待寄信', '最後成交時間', '最後抓取時間', '資料狀態'
+  ],
+  ALERT_HEADERS: [
+    '寄送時間', '掃描ID', '股票代號', '到期日', '類型', '履約價', 'Bid', 'Delta估算',
+    'Vega估算(每1%)', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態'
   ],
 });
 
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('選擇權警示')
-    .addItem('新增／更新監控', 'showMonitorDialog')
+    .addItem('新增／更新期權鍊掃描', 'showScanDialog')
     .addItem('要求下一輪立即更新', 'requestNextRefresh')
     .addSeparator()
-    .addItem('初始化／修復系統', 'setupSystem')
+    .addItem('初始化／升級系統', 'setupSystem')
     .addToUi();
 }
 
@@ -36,17 +43,22 @@ function doGet() {
   ensureSystemSheets_();
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
-    .setTitle('選擇權警示設定')
+    .setTitle('期權鍊掃描設定')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
 }
 
-function showMonitorDialog() {
+function showScanDialog() {
   ensureSystemSheets_();
   const output = HtmlService.createTemplateFromFile('Index')
     .evaluate()
-    .setWidth(520)
-    .setHeight(700);
-  SpreadsheetApp.getUi().showModalDialog(output, '新增／更新選擇權監控');
+    .setWidth(650)
+    .setHeight(860);
+  SpreadsheetApp.getUi().showModalDialog(output, '新增／更新期權鍊掃描');
+}
+
+// 保留舊選單或舊連結的相容性。
+function showMonitorDialog() {
+  showScanDialog();
 }
 
 function getFormDefaults() {
@@ -57,18 +69,18 @@ function getFormDefaults() {
   };
 }
 
-function submitMonitor(payload) {
-  const input = validateMonitorInput_(payload || {});
+function submitScan(payload) {
+  const input = validateScanInput_(payload || {});
   const lock = LockService.getDocumentLock();
   lock.waitLock(30000);
   try {
     ensureSystemSheets_();
-    const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.MONITORS);
+    const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SCANS);
     const values = sheet.getDataRange().getValues();
-    const idColumn = APP.MONITOR_HEADERS.indexOf('監控ID');
+    const idColumn = APP.SCAN_HEADERS.indexOf('掃描ID');
     let rowNumber = -1;
     for (let row = 1; row < values.length; row += 1) {
-      if (String(values[row][idColumn] || '') === input.monitorId) {
+      if (String(values[row][idColumn] || '') === input.scanId) {
         rowNumber = row + 1;
         break;
       }
@@ -76,57 +88,64 @@ function submitMonitor(payload) {
 
     const inputValues = [[
       true,
-      input.monitorId,
+      input.scanId,
       input.ticker,
       input.expiry,
-      input.optionType,
-      input.strike,
-      input.lowThreshold === null ? '' : input.lowThreshold,
-      input.highThreshold === null ? '' : input.highThreshold,
+      input.displayType,
+      input.deltaOperator,
+      input.deltaThreshold === null ? '' : input.deltaThreshold,
+      input.vegaOperator,
+      input.vegaThreshold === null ? '' : input.vegaThreshold,
+      input.annualReturnOperator,
+      input.annualReturnThreshold === null ? '' : input.annualReturnThreshold,
+      input.callCostBasis === null ? '' : input.callCostBasis,
+      input.openInterestMin === null ? '' : input.openInterestMin,
       input.emailEnabled,
       input.note,
     ]];
 
-    if (rowNumber === -1) {
-      rowNumber = Math.max(sheet.getLastRow() + 1, 2);
-      sheet.getRange(rowNumber, 1, 1, APP.MONITOR_HEADERS.length).clearContent();
-    }
+    const isNew = rowNumber === -1;
+    if (isNew) rowNumber = Math.max(sheet.getLastRow() + 1, 2);
+    sheet.getRange(rowNumber, 1, 1, APP.SCAN_HEADERS.length).clearContent();
     sheet.getRange(rowNumber, 1, 1, inputValues[0].length).setValues(inputValues);
-    sheet.getRange(rowNumber, 11).setValue('待抓取');
-    sheet.getRange(rowNumber, 29).setValue('等待雲端更新');
-    sheet.getRange(rowNumber, 35).setValue(input.sheetName);
-    ensureContractSheet_(input.sheetName);
+    sheet.getRange(rowNumber, 16).setValue('待抓取');
+    sheet.getRange(rowNumber, 21).setValue('等待雲端更新');
+    sheet.getRange(rowNumber, 25).setValue(input.sheetName);
+    sheet.getRange(rowNumber, 26).setValue(false);
+    applyScanFormatting_();
+    ensureChainSheet_(input.sheetName);
     requestNextRefresh();
 
     return {
       ok: true,
-      monitorId: input.monitorId,
+      scanId: input.scanId,
       sheetName: input.sheetName,
-      message: rowNumber === values.length + 1 ? '監控已新增' : '監控已儲存',
+      message: isNew ? '掃描已新增；第一次抓取只建立基準，不寄信' : '掃描設定已更新；下一次抓取會重新建立基準',
     };
   } finally {
     lock.releaseLock();
   }
 }
 
+function submitMonitor(payload) {
+  return submitScan(payload);
+}
+
 function setupSystem() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   if (!spreadsheet) throw new Error('請從綁定的 Google Sheet 執行初始化');
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', spreadsheet.getId());
+  migrateLegacySheets_();
   ensureSystemSheets_();
   const settingsSheet = spreadsheet.getSheetByName(APP.SHEETS.SETTINGS);
   const settings = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 2).getValues();
   const spreadsheetIdRow = settings.findIndex(row => row[0] === 'Spreadsheet ID');
-  if (spreadsheetIdRow >= 0) {
-    settingsSheet.getRange(spreadsheetIdRow + 2, 2).setValue(spreadsheet.getId());
-  }
+  if (spreadsheetIdRow >= 0) settingsSheet.getRange(spreadsheetIdRow + 2, 2).setValue(spreadsheet.getId());
   const versionRow = settings.findIndex(row => row[0] === '系統版本');
-  if (versionRow >= 0) {
-    settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
-  }
+  if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
   installEmailTrigger_();
-  applyMonitorFormatting_();
-  spreadsheet.toast('系統初始化完成', '選擇權警示', 5);
+  applyScanFormatting_();
+  spreadsheet.toast('系統已初始化／升級至 0.3.0；既有舊版資料如有存在會另外保留', '選擇權警示', 7);
 }
 
 function requestNextRefresh() {
@@ -146,13 +165,12 @@ function processPendingEmails() {
   const lock = LockService.getDocumentLock();
   if (!lock.tryLock(25000)) return;
   try {
-    ensureSystemSheets_();
     const settings = getSettings_();
     const recipient = String(settings['通知信箱'] || '').trim();
     if (!recipient) return;
 
     const spreadsheet = getSpreadsheet_();
-    const sheet = spreadsheet.getSheetByName(APP.SHEETS.MONITORS);
+    const sheet = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
     const values = sheet.getDataRange().getValues();
     if (values.length < 2) return;
     const headerMap = Object.fromEntries(values[0].map((header, index) => [header, index]));
@@ -160,137 +178,238 @@ function processPendingEmails() {
 
     for (let index = 1; index < values.length; index += 1) {
       const row = values[index];
-      const pending = String(row[headerMap['待寄信']] || '').trim();
+      const pendingText = String(row[headerMap['待寄信']] || '').trim();
       const enabled = row[headerMap['Email通知']] === true;
-      const dataStatus = String(row[headerMap['資料狀態']] || '');
-      if (!pending || !enabled || /報價不足|抓取失敗|流量限制|找不到合約/.test(dataStatus)) continue;
+      const scanEnabled = row[headerMap['啟用']] === true;
+      if (!pendingText || !enabled || !scanEnabled) continue;
 
-      const subject = `[選擇權警示] ${row[headerMap['股票代號']]} ${row[headerMap['類型']]} ${row[headerMap['履約價']]} ${pending}`;
-      const body = buildAlertEmail_(row, headerMap, pending, spreadsheet.getUrl());
-      MailApp.sendEmail({to: recipient, subject: subject, body: body, name: '選擇權警示'});
+      let payload;
+      try {
+        payload = JSON.parse(pendingText);
+      } catch (error) {
+        console.error(`無法解析待寄信資料：${error}`);
+        continue;
+      }
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      if (!items.length) continue;
+      const ticker = row[headerMap['股票代號']];
+      const expiry = formatSheetDate_(row[headerMap['到期日']]);
+      const total = Number(payload.total || items.length);
+      const subject = `【選擇權警示】${ticker} ${expiry}：${total} 個履約價格符合條件`;
+      const message = buildScanAlertEmail_(ticker, expiry, payload, spreadsheet.getUrl());
+      MailApp.sendEmail({
+        to: recipient,
+        subject: subject,
+        body: message.body,
+        htmlBody: message.htmlBody,
+        name: '選擇權警示',
+      });
+
       const sentAt = new Date();
       sheet.getRange(index + 1, headerMap['待寄信'] + 1).clearContent();
       sheet.getRange(index + 1, headerMap['最後通知時間'] + 1).setValue(sentAt);
-      alertLog.appendRow([
+      const logRows = items.map(item => [
         sentAt,
-        row[headerMap['監控ID']],
-        row[headerMap['股票代號']],
+        row[headerMap['掃描ID']],
+        ticker,
         row[headerMap['到期日']],
-        row[headerMap['類型']],
-        row[headerMap['履約價']],
-        pending,
-        row[headerMap['警示採用價']],
-        row[headerMap['價格來源']],
-        pending === '高於上限' ? row[headerMap['高於警示']] : row[headerMap['低於警示']],
+        item.option_type || '',
+        item.strike ?? '',
+        item.bid ?? '',
+        item.delta ?? '',
+        item.vega ?? '',
+        item.annual_return ?? '',
+        item.open_interest ?? '',
+        item.dte ?? '',
+        item.contract_symbol || '',
         recipient,
         '已寄送',
       ]);
+      if (logRows.length) {
+        alertLog.getRange(alertLog.getLastRow() + 1, 1, logRows.length, APP.ALERT_HEADERS.length).setValues(logRows);
+      }
     }
   } finally {
     lock.releaseLock();
   }
 }
 
-function buildAlertEmail_(row, headerMap, pending, spreadsheetUrl) {
-  const field = name => row[headerMap[name]] === '' ? '—' : row[headerMap[name]];
-  return [
-    `觸發狀態：${pending}`,
-    `股票：${field('股票代號')}`,
-    `到期日：${field('到期日')}`,
-    `類型／履約價：${field('類型')} ${field('履約價')}`,
-    `目前權利金：${field('警示採用價')} (${field('價格來源')})`,
-    `低於／高於門檻：${field('低於警示')} / ${field('高於警示')}`,
-    `Delta／Vega／Theta：${field('Delta估算')} / ${field('Vega估算(每1%)')} / ${field('Theta估算(每日)')}`,
-    `DTE：${field('DTE')}`,
-    `最後成交時間：${field('最後成交時間')}`,
-    `系統抓取時間：${field('最後抓取時間')}`,
+function buildScanAlertEmail_(ticker, expiry, payload, spreadsheetUrl) {
+  const items = payload.items || [];
+  const lines = [
+    `${ticker} ${expiry} 有 ${payload.total || items.length} 個新符合條件的合約：`,
     '',
-    'Greeks 為 Black-Scholes-Merton 估算值，不是 Yahoo 原始欄位。',
-    `開啟試算表：${spreadsheetUrl}`,
-  ].join('\n');
+  ];
+  items.forEach(item => {
+    lines.push(
+      `${item.option_type}｜履約價 ${formatNumber_(item.strike, 4)}｜Bid ${formatNumber_(item.bid, 4)}｜` +
+      `Delta ${formatNumber_(item.delta, 4)}｜Vega ${formatNumber_(item.vega, 4)}｜` +
+      `年化 ${formatPercent_(item.annual_return)}｜未平倉 ${formatNumber_(item.open_interest, 0)}｜DTE ${item.dte ?? '—'}`
+    );
+  });
+  if (Number(payload.total || 0) > items.length) lines.push('', `其餘 ${Number(payload.total) - items.length} 個請開啟工作表查看。`);
+  lines.push('', '年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365；不含手續費、稅金及指派風險。');
+  lines.push('Greeks 為 Black-Scholes-Merton 估算值，不是 Yahoo 原始欄位。');
+  lines.push(`開啟試算表：${spreadsheetUrl}`);
+
+  const tableRows = items.map(item => `
+    <tr>
+      <td>${escapeHtml_(item.option_type || '')}</td>
+      <td>${escapeHtml_(formatNumber_(item.strike, 4))}</td>
+      <td>${escapeHtml_(formatNumber_(item.bid, 4))}</td>
+      <td>${escapeHtml_(formatNumber_(item.delta, 4))}</td>
+      <td>${escapeHtml_(formatNumber_(item.vega, 4))}</td>
+      <td>${escapeHtml_(formatPercent_(item.annual_return))}</td>
+      <td>${escapeHtml_(formatNumber_(item.open_interest, 0))}</td>
+      <td>${escapeHtml_(item.dte ?? '—')}</td>
+    </tr>`).join('');
+  const more = Number(payload.total || 0) > items.length
+    ? `<p>其餘 ${Number(payload.total) - items.length} 個請開啟工作表查看。</p>`
+    : '';
+  const htmlBody = `
+    <p><strong>${escapeHtml_(ticker)} ${escapeHtml_(expiry)}</strong> 有 ${escapeHtml_(payload.total || items.length)} 個新符合條件的合約：</p>
+    <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px">
+      <thead><tr style="background:#e5e7eb">
+        <th style="padding:7px;border:1px solid #cbd5e1">類型</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">履約價</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">Bid</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">Delta</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">Vega</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">年化報酬率</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">未平倉</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">DTE</th>
+      </tr></thead><tbody>${tableRows}</tbody>
+    </table>
+    ${more}
+    <p style="color:#475569;font-size:12px">年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365；不含手續費、稅金及指派風險。<br>
+    Greeks 為 Black-Scholes-Merton 估算值，不是 Yahoo 原始欄位。</p>
+    <p><a href="${escapeHtml_(spreadsheetUrl)}">開啟 Google Sheet</a></p>`;
+  return {body: lines.join('\n'), htmlBody: htmlBody};
 }
 
-function validateMonitorInput_(payload) {
+function validateScanInput_(payload) {
   const ticker = String(payload.ticker || '').trim().toUpperCase();
   const expiry = String(payload.expiry || '').trim();
-  const optionType = String(payload.optionType || '').trim().toUpperCase();
-  const strike = parsePositiveNumber_(payload.strike, '履約價');
-  const lowThreshold = parseOptionalPositiveNumber_(payload.lowThreshold, '低於警示價');
-  const highThreshold = parseOptionalPositiveNumber_(payload.highThreshold, '高於警示價');
+  const displayType = String(payload.displayType || 'ALL').trim().toUpperCase();
   if (!/^[A-Z0-9.^-]{1,15}$/.test(ticker)) throw new Error('股票代號格式不正確');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry) || isNaN(new Date(`${expiry}T12:00:00Z`).getTime())) {
     throw new Error('到期日格式不正確');
   }
-  if (!['CALL', 'PUT'].includes(optionType)) throw new Error('類型必須是 CALL 或 PUT');
-  if (lowThreshold === null && highThreshold === null) throw new Error('至少輸入一個權利金警示價');
-  if (lowThreshold !== null && highThreshold !== null && lowThreshold >= highThreshold) {
-    throw new Error('低於警示價必須小於高於警示價');
-  }
-  const strikeText = String(Number(strike.toFixed(6)));
-  const monitorId = `${ticker}|${expiry}|${optionType}|${strikeText}`;
+  if (!['ALL', 'CALL', 'PUT'].includes(displayType)) throw new Error('顯示類型必須是 ALL、CALL 或 PUT');
+
+  const delta = parseConditionPair_(payload.deltaOperator, payload.deltaThreshold, 'Delta');
+  if (delta.threshold !== null && delta.threshold > 1) throw new Error('Delta門檻必須介於 0 與 1');
+  const vega = parseConditionPair_(payload.vegaOperator, payload.vegaThreshold, 'Vega');
+  const annual = parseConditionPair_(payload.annualReturnOperator, payload.annualReturnThreshold, '年化報酬率');
+  if (annual.threshold !== null) annual.threshold /= 100;
+  const callCostBasis = parseOptionalPositiveNumber_(payload.callCostBasis, 'CALL持股成本');
+  const openInterestMin = parseOptionalNonNegativeNumber_(payload.openInterestMin, '未平倉口數');
+  if (openInterestMin !== null && !Number.isInteger(openInterestMin)) throw new Error('未平倉口數必須是整數');
+
+  const scanId = `${ticker}|${expiry}`;
   const sheetName = `${ticker.replace(/[^A-Z0-9._-]/g, '')}_${expiry}`.slice(0, 100);
   return {
     ticker,
     expiry,
-    optionType,
-    strike,
-    lowThreshold,
-    highThreshold,
+    displayType,
+    deltaOperator: delta.operator,
+    deltaThreshold: delta.threshold,
+    vegaOperator: vega.operator,
+    vegaThreshold: vega.threshold,
+    annualReturnOperator: annual.operator,
+    annualReturnThreshold: annual.threshold,
+    callCostBasis,
+    openInterestMin,
     emailEnabled: payload.emailEnabled !== false,
     note: String(payload.note || '').trim().slice(0, 500),
-    monitorId,
+    scanId,
     sheetName,
   };
 }
 
-function parsePositiveNumber_(value, label) {
+function parseConditionPair_(operatorValue, thresholdValue, label) {
+  const operator = String(operatorValue || '').trim();
+  const hasThreshold = !(thresholdValue === '' || thresholdValue === null || thresholdValue === undefined);
+  if (!!operator !== hasThreshold) throw new Error(`${label}的比較方式與門檻必須同時填寫或同時留空`);
+  if (!operator) return {operator: '', threshold: null};
+  if (!['≥', '≤'].includes(operator)) throw new Error(`${label}比較方式必須是 ≥ 或 ≤`);
+  return {operator: operator, threshold: parseNonNegativeNumber_(thresholdValue, `${label}門檻`)};
+}
+
+function parseNonNegativeNumber_(value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${label}必須大於或等於 0`);
+  return number;
+}
+
+function parseOptionalNonNegativeNumber_(value, label) {
+  if (value === '' || value === null || value === undefined) return null;
+  return parseNonNegativeNumber_(value, label);
+}
+
+function parseOptionalPositiveNumber_(value, label) {
+  if (value === '' || value === null || value === undefined) return null;
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) throw new Error(`${label}必須大於 0`);
   return number;
 }
 
-function parseOptionalPositiveNumber_(value, label) {
-  if (value === '' || value === null || value === undefined) return null;
-  return parsePositiveNumber_(value, label);
-}
-
 function ensureSystemSheets_() {
   const spreadsheet = getSpreadsheet_();
+  migrateLegacySheets_();
   const definitions = [
     [APP.SHEETS.DASHBOARD, ['選擇權警示控制台']],
-    [APP.SHEETS.MONITORS, APP.MONITOR_HEADERS],
+    [APP.SHEETS.SCANS, APP.SCAN_HEADERS],
     [APP.SHEETS.SETTINGS, ['設定項目', '設定值', '說明']],
-    [APP.SHEETS.ALERTS, ['寄送時間', '監控ID', '股票代號', '到期日', '類型', '履約價', '觸發狀態', '當時價格', '價格來源', '觸發門檻', '收件信箱', '寄送狀態']],
+    [APP.SHEETS.ALERTS, APP.ALERT_HEADERS],
     [APP.SHEETS.SYSTEM, ['時間(UTC)', '等級', '訊息', '詳細資料']],
   ];
   definitions.forEach(([name, headers]) => {
     let sheet = spreadsheet.getSheetByName(name);
     if (!sheet) sheet = spreadsheet.insertSheet(name);
-    if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
   });
   seedSettings_();
   seedDashboard_();
 }
 
+function migrateLegacySheets_() {
+  const spreadsheet = getSpreadsheet_();
+  const legacyMonitor = spreadsheet.getSheetByName(APP.SHEETS.LEGACY_MONITORS);
+  if (legacyMonitor) legacyMonitor.setName(nextAvailableSheetName_('監控清單_舊版'));
+
+  const alertSheet = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
+  if (alertSheet && alertSheet.getLastColumn() > 0) {
+    const headers = alertSheet.getRange(1, 1, 1, alertSheet.getLastColumn()).getValues()[0];
+    if (headers.includes('監控ID') && !headers.includes('掃描ID')) {
+      alertSheet.setName(nextAvailableSheetName_('警示紀錄_舊版'));
+    }
+  }
+}
+
+function nextAvailableSheetName_(baseName) {
+  const spreadsheet = getSpreadsheet_();
+  if (!spreadsheet.getSheetByName(baseName)) return baseName;
+  let number = 2;
+  while (spreadsheet.getSheetByName(`${baseName}_${number}`)) number += 1;
+  return `${baseName}_${number}`;
+}
+
 function seedSettings_() {
   const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SETTINGS);
-  if (sheet.getLastRow() > 1) return;
   const rows = [
     ['Spreadsheet ID', '', '初始化時自動填入；GitHub Actions 也需設定相同 ID'],
     ['通知信箱', '', '全系統固定收件信箱'],
     ['開盤更新間隔(分鐘)', 5, 'GitHub Actions 最短排程為 5 分鐘'],
     ['盤外更新間隔(分鐘)', 10, '盤前、盤後、休市'],
     ['資料過期門檻(分鐘)', 10, '超過後在表內標示異常'],
-    ['警示回復緩衝', 0.02, '回到門檻內 2% 後才重新啟用'],
     ['無風險利率代號', '^IRX', 'Yahoo 13 週國庫券指標'],
     ['備援無風險利率', 0.05, '^IRX 失敗時採用'],
     ['預設股息殖利率', 0, 'Yahoo 缺失時採用'],
     ['顯示時區', 'Asia/Taipei', '使用者介面與工作表'],
     ['市場時區', 'America/New_York', '到期與市場時段判斷'],
-    ['Cloud Run URL', '', '部署後填入'],
+    ['Cloud Run URL', '', '選用部署後填入'],
     ['Web App URL', '', 'Apps Script 部署後填入'],
     ['系統版本', APP.VERSION, '目前規格版本'],
     ['下次允許抓取(UTC)', '', '系統管理：流量限制退避'],
@@ -299,71 +418,120 @@ function seedSettings_() {
     ['最後執行(UTC)', '', '系統管理'],
     ['最後狀態', '尚未執行', '系統管理'],
   ];
-  sheet.getRange(2, 1, rows.length, 3).setValues(rows);
+  const existing = sheet.getLastRow() >= 2
+    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues()
+    : [];
+  const existingNames = new Set(existing.map(row => String(row[0] || '')));
+  const missing = rows.filter(row => !existingNames.has(row[0]));
+  if (missing.length) sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, 3).setValues(missing);
+  sheet.getRange(1, 1, 1, 3).setBackground('#E5E7EB').setFontWeight('bold');
+  sheet.setColumnWidth(1, 190);
+  sheet.setColumnWidth(2, 250);
+  sheet.setColumnWidth(3, 330);
 }
 
 function seedDashboard_() {
   const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.DASHBOARD);
-  if (sheet.getLastRow() > 1) return;
   sheet.getRange('A1:H1').merge().setValue('選擇權警示控制台');
-  sheet.getRange('A2:H2').merge().setValue('Yahoo Finance + yfinance｜Mid 優先｜Greeks 為模型估算值');
-  sheet.getRange('A4:H4').setValues([['啟用監控', '數量', '目前警示', '數量', '資料異常', '數量', '最後成功抓取', '時間']]);
-  sheet.getRange('B5').setFormula('=COUNTIF(\'監控清單\'!$A$2:$A$1000,TRUE)');
-  sheet.getRange('D5').setFormula('=COUNTIF(\'監控清單\'!$AD$2:$AD$1000,"高於上限")+COUNTIF(\'監控清單\'!$AD$2:$AD$1000,"低於下限")');
-  sheet.getRange('F5').setFormula('=COUNTIF(\'監控清單\'!$AC$2:$AC$1000,"*不足*")+COUNTIF(\'監控清單\'!$AC$2:$AC$1000,"*失敗*")+COUNTIF(\'監控清單\'!$AC$2:$AC$1000,"*限制*")');
-  sheet.getRange('H5').setFormula('=\'設定\'!$B$18');
+  sheet.getRange('A2:H2').merge().setValue('Yahoo Finance + yfinance｜完整期權鍊｜Greeks 為模型估算值');
+  sheet.getRange('A4:H4').setValues([['啟用掃描', '數量', '符合合約', '數量', '資料異常', '數量', '最後成功抓取', '時間']]);
+  sheet.getRange('B5').setFormula('=COUNTIF(\'掃描設定\'!$A$2:$A$1000,TRUE)');
+  sheet.getRange('D5').setFormula('=SUM(\'掃描設定\'!$S$2:$S$1000)');
+  sheet.getRange('F5').setFormula('=COUNTIF(\'掃描設定\'!$U$2:$U$1000,"*不足*")+COUNTIF(\'掃描設定\'!$U$2:$U$1000,"*失敗*")+COUNTIF(\'掃描設定\'!$U$2:$U$1000,"*限制*")');
+  sheet.getRange('H5').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("最後成功抓取(UTC)",\'設定\'!$A$2:$A$40,0)),"")');
+  sheet.getRange('A7:B10').setValues([
+    ['系統狀態', ''],
+    ['最後執行', ''],
+    ['下次允許抓取', ''],
+    ['系統版本', ''],
+  ]);
+  sheet.getRange('B7').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("最後狀態",\'設定\'!$A$2:$A$40,0)),"")');
+  sheet.getRange('B8').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("最後執行(UTC)",\'設定\'!$A$2:$A$40,0)),"")');
+  sheet.getRange('B9').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("下次允許抓取(UTC)",\'設定\'!$A$2:$A$40,0)),"")');
+  sheet.getRange('B10').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("系統版本",\'設定\'!$A$2:$A$40,0)),"")');
+  sheet.getRange('A7:A10').setBackground('#F8FAFC').setFontWeight('bold');
+  sheet.getRange('B7:B10').setFontColor('#008000');
+  sheet.getRange('A12:H12').merge().setValue('使用方式');
+  sheet.getRange('A13:H18').mergeAcross();
+  sheet.getRange('A13:A18').setValues([
+    ['1. 從選單「選擇權警示」執行「初始化／升級系統」。'],
+    ['2. 在「設定」確認固定通知信箱。'],
+    ['3. 用表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。'],
+    ['4. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。'],
+    ['5. 年化報酬率只用有效 Bid；PUT 以履約價、CALL 以持股成本作為本金。'],
+    ['6. 本工具只供個人研究與監控，不會執行任何交易。'],
+  ]);
+  sheet.getRange('A1:H1').setBackground('#F1F5F9').setFontColor('#1D4ED8').setFontWeight('bold').setFontSize(18);
+  sheet.getRange('A4:H4').setBackground('#E5E7EB').setFontWeight('bold');
+  sheet.getRange('A12:H12').setBackground('#E5E7EB').setFontWeight('bold');
+  sheet.getRange('A13:H18').setWrap(true);
 }
 
-function ensureContractSheet_(sheetName) {
+function ensureChainSheet_(sheetName) {
   const spreadsheet = getSpreadsheet_();
   let sheet = spreadsheet.getSheetByName(sheetName);
   if (!sheet) sheet = spreadsheet.insertSheet(sheetName);
-  sheet.getRange(1, 1, 1, APP.CONTRACT_HEADERS.length).setValues([APP.CONTRACT_HEADERS]);
+  sheet.getRange(1, 1, 1, APP.CHAIN_HEADERS.length).setValues([APP.CHAIN_HEADERS]);
   sheet.setFrozenRows(1);
   sheet.setFrozenColumns(4);
-  sheet.getRange(1, 1, 1, APP.CONTRACT_HEADERS.length)
+  sheet.getRange(1, 1, 1, APP.CHAIN_HEADERS.length)
     .setBackground('#E5E7EB')
     .setFontWeight('bold')
-    .setFontColor('#111827');
-  sheet.getRange('D:D').setNumberFormat('0.00');
-  sheet.getRange('F:Q').setNumberFormat('0.0000');
-  sheet.getRange('S:U').setNumberFormat('0.0000');
-  applyContractConditionalFormatting_(sheet);
+    .setFontColor('#111827')
+    .setWrap(true);
+  sheet.getRange('C:J').setNumberFormat('0.0000');
+  sheet.getRange('L:N').setNumberFormat('0.00%');
+  sheet.getRange('P:S').setNumberFormat('0.0000');
+  sheet.getRange('T:T').setNumberFormat('0');
+  sheet.getRange('U:U').setNumberFormat('0.00%');
+  sheet.getRange('V:V').setNumberFormat('0.0000');
+  sheet.getRange('W:X').setNumberFormat('#,##0');
+  sheet.getRange('AH:AI').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  applyChainConditionalFormatting_(sheet);
 }
 
-function applyMonitorFormatting_() {
-  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.MONITORS);
+function applyScanFormatting_() {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SCANS);
   if (!sheet) return;
   sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(10);
-  sheet.getRange(1, 1, 1, APP.MONITOR_HEADERS.length)
+  sheet.setFrozenColumns(5);
+  sheet.getRange(1, 1, 1, APP.SCAN_HEADERS.length)
     .setBackground('#E5E7EB')
     .setFontWeight('bold')
-    .setFontColor('#111827');
-  // 匯入範本的 A／I／E 已是原生 BOOLEAN／BOOLEAN／DROPDOWN 表格欄。
-  // Google Sheets 不允許 Apps Script 重設指定類型欄；普通工作表才補套驗證。
-  const isPlainGrid = applyUnlessTypedColumn_(() => sheet.getRange('A2:A1000').insertCheckboxes());
-  if (isPlainGrid) {
-    sheet.getRange('I2:I1000').insertCheckboxes();
-    sheet.getRange('E2:E1000').setDataValidation(
-      SpreadsheetApp.newDataValidation().requireValueInList(['CALL', 'PUT'], true).setAllowInvalid(false).build()
-    );
-    const range = sheet.getRange('A2:AI1000');
-    const rules = [
-      SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$A2=FALSE').setBackground('#F3F4F6').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AD2="高於上限",$AD2="低於下限")').setBackground('#FECACA').setFontColor('#991B1B').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR(REGEXMATCH($AC2,"不足|過期|限制|失敗"),$K2="錯誤")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
-    ];
-    sheet.setConditionalFormatRules(rules);
-  }
+    .setFontColor('#111827')
+    .setWrap(true);
+  sheet.getRange('A2:A1000').insertCheckboxes();
+  sheet.getRange('N2:N1000').insertCheckboxes();
+  sheet.getRange('E2:E1000').setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(['ALL', 'CALL', 'PUT'], true).setAllowInvalid(false).build()
+  );
+  ['F', 'H', 'J'].forEach(column => sheet.getRange(`${column}2:${column}1000`).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(['≥', '≤'], true).setAllowInvalid(false).build()
+  ));
+  sheet.getRange('D:D').setNumberFormat('yyyy-mm-dd');
+  sheet.getRange('G:G').setNumberFormat('0.0000');
+  sheet.getRange('I:I').setNumberFormat('0.0000');
+  sheet.getRange('K:K').setNumberFormat('0.00%');
+  sheet.getRange('L:L').setNumberFormat('0.0000');
+  sheet.getRange('M:M').setNumberFormat('#,##0');
+  sheet.getRange('Q:Q').setNumberFormat('0.0000');
+  sheet.getRange('R:S').setNumberFormat('#,##0');
+  sheet.getRange('T:T').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('W:W').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  const range = sheet.getRange('A2:AA1000');
+  const rules = [
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$A2=FALSE').setBackground('#F3F4F6').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$S2>0').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($U2,"不足|過期|限制|失敗|無資料")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
+  ];
+  sheet.setConditionalFormatRules(rules);
 }
 
-function applyContractConditionalFormatting_(sheet) {
-  const range = sheet.getRange('A2:AB1000');
+function applyChainConditionalFormatting_(sheet) {
+  const range = sheet.getRange('A2:AJ1000');
   const rules = [
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$B2=FALSE').setBackground('#F3F4F6').setRanges([range]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AB2="高於上限",$AB2="低於下限")').setBackground('#FECACA').setFontColor('#991B1B').setRanges([range]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($AA2,"不足|過期|限制|失敗")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$AC2="符合"').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AC2="資料不足",REGEXMATCH($AJ2,"不足|無效"))').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
 }
@@ -381,16 +549,26 @@ function installEmailTrigger_() {
   if (!exists) ScriptApp.newTrigger('processPendingEmails').timeBased().everyMinutes(1).create();
 }
 
-function applyUnlessTypedColumn_(operation) {
-  try {
-    operation();
-    return true;
-  } catch (error) {
-    const message = String(error && error.message ? error.message : error);
-    if (!/指定類型欄|typed column/i.test(message)) throw error;
-    console.log(`保留 Google Sheets 原生指定類型欄：${message}`);
-    return false;
-  }
+function formatSheetDate_(value) {
+  if (value instanceof Date) return Utilities.formatDate(value, 'UTC', 'yyyy-MM-dd');
+  return String(value || '').slice(0, 10);
+}
+
+function formatNumber_(value, digits) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  return number.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+function formatPercent_(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${(number * 100).toFixed(2)}%` : '—';
+}
+
+function escapeHtml_(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
 }
 
 function getSpreadsheet_() {
@@ -400,8 +578,6 @@ function getSpreadsheet_() {
     return active;
   }
   const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  if (!spreadsheetId) {
-    throw new Error('尚未設定 Spreadsheet ID；請先從 Google Sheet 執行 setupSystem');
-  }
+  if (!spreadsheetId) throw new Error('尚未設定 Spreadsheet ID；請先從 Google Sheet 執行 setupSystem');
   return SpreadsheetApp.openById(spreadsheetId);
 }
