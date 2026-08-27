@@ -240,6 +240,8 @@ class RefreshService:
                         overall_result = "符合" if evaluation.matched else "未符合"
 
                     data_issues: list[str] = []
+                    if snapshot.dividend_yield_note:
+                        data_issues.append(snapshot.dividend_yield_note)
                     if snapshot.underlying_price is None:
                         data_issues.append("標的股價不足")
                     if seller_price is None:

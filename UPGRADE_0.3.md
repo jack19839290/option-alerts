@@ -1,4 +1,4 @@
-# 0.2.1 升級至 0.3.1
+# 0.2.1 升級至 0.3.2
 
 這份流程適用於已經能用 GitHub Actions 更新 Google Sheet 的既有使用者。升級不需要建立新的 Google Cloud Project，也不需要更換原本的 GitHub Secrets。
 
@@ -14,7 +14,7 @@
 1. 開啟 GitHub Desktop。
 2. 確認左上角 Current repository 是這個選擇權警示專案。
 3. 左側 Changes 應該會看到本次修改的程式檔案。
-4. 左下角 Summary 輸入：`Upgrade to option chain scanner v0.3.1`。
+4. 左下角 Summary 輸入：`Upgrade to option chain scanner v0.3.2`。
 5. 按下 Commit to main。
 6. 按上方 Push origin。
 

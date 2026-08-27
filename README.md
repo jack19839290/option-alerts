@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.3.1`
+目前版本：`0.3.2`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算 Greeks 與賣出權利金年化報酬率，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 
@@ -14,6 +14,7 @@
 - PUT 年化報酬率為 `Bid ÷ 履約價 ÷ DTE × 365`。
 - CALL 年化報酬率為 `Bid ÷ 持股成本 ÷ DTE × 365`；未填持股成本時留白。
 - Delta、Vega（每 1% IV）、Theta（每日）由 Black-Scholes-Merton 模型估算。
+- Yahoo 的 `trailingAnnualDividendYield` 與 `dividendYield` 採各自單位正規化；不合理的股息率不會直接帶入 Greeks。
 - 第一次成功掃描只建立基準、不寄信；之後僅在合約新符合全部條件時通知。
 - 同一輪的多個新符合合約合併成一封 Email，信中列出 CALL／PUT、履約價、Bid、Delta、Vega、年化報酬率、未平倉量與 DTE。
 - 連續兩次有效不符合後才重新啟用該合約的通知，降低邊界值反覆寄信。

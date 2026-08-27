@@ -7,6 +7,9 @@ from typing import Any
 from .models import ChainSnapshot, OptionQuote
 
 
+MAX_REASONABLE_DIVIDEND_YIELD = 0.20
+
+
 class MarketDataError(RuntimeError):
     pass
 
@@ -28,11 +31,32 @@ def _safe_int(value: Any) -> int | None:
     return int(number) if number is not None else None
 
 
-def _normalize_yield(value: Any, fallback: float) -> float:
-    result = _safe_float(value)
-    if result is None or result < 0:
-        return fallback
-    return result / 100.0 if result > 1.0 else result
+def _select_dividend_yield(
+    underlying: dict[str, Any], fallback: float
+) -> tuple[float, str]:
+    """Normalize Yahoo yield fields that use different units.
+
+    ``trailingAnnualDividendYield`` is a decimal ratio, while
+    ``dividendYield`` is expressed in percentage points.
+    """
+    candidates = [
+        _safe_float(underlying.get("trailingAnnualDividendYield")),
+        (
+            value / 100.0
+            if (value := _safe_float(underlying.get("dividendYield"))) is not None
+            else None
+        ),
+    ]
+    saw_invalid = False
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        if 0 <= candidate <= MAX_REASONABLE_DIVIDEND_YIELD:
+            return candidate, ""
+        saw_invalid = True
+    if saw_invalid:
+        return fallback, "股息率資料異常，採用預設值"
+    return fallback, ""
 
 
 class YahooFinanceProvider:
@@ -65,10 +89,8 @@ class YahooFinanceProvider:
             chain = ticker.option_chain(expiry.isoformat())
             underlying = chain.underlying or {}
             spot = self._underlying_price(ticker, underlying)
-            dividend_yield = _normalize_yield(
-                underlying.get("dividendYield")
-                or underlying.get("trailingAnnualDividendYield"),
-                self.default_dividend_yield,
+            dividend_yield, dividend_yield_note = _select_dividend_yield(
+                underlying, self.default_dividend_yield
             )
             quotes = self._convert_frame(chain.calls, "CALL")
             quotes.extend(self._convert_frame(chain.puts, "PUT"))
@@ -78,6 +100,7 @@ class YahooFinanceProvider:
                 underlying_price=spot,
                 dividend_yield=dividend_yield,
                 quotes=quotes,
+                dividend_yield_note=dividend_yield_note,
             )
         except Exception as exc:
             if self._is_rate_limit(exc):
@@ -125,4 +148,3 @@ class YahooFinanceProvider:
     def _is_rate_limit(exc: Exception) -> bool:
         text = str(exc).lower()
         return "429" in text or "too many requests" in text or "rate limit" in text
-

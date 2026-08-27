@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.3.1',
+  VERSION: '0.3.2',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -154,7 +154,7 @@ function setupSystem() {
   if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
   installEmailTrigger_();
   applyScanFormatting_();
-  spreadsheet.toast('系統已初始化／升級至 0.3.1；既有舊版資料如有存在會另外保留', '選擇權警示', 7);
+  spreadsheet.toast('系統已初始化／升級至 0.3.2；既有舊版資料如有存在會另外保留', '選擇權警示', 7);
 }
 
 function requestNextRefresh() {

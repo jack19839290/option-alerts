@@ -85,6 +85,13 @@ class RateLimitedProvider(FakeProvider):
         raise RateLimitError("429 Too Many Requests")
 
 
+class DividendWarningProvider(FakeProvider):
+    def fetch_chain(self, ticker, expiry):
+        snapshot = super().fetch_chain(ticker, expiry)
+        snapshot.dividend_yield_note = "股息率資料異常，採用預設值"
+        return snapshot
+
+
 def make_scan(*, baseline=False, fingerprint=""):
     row = [
         True,
@@ -150,6 +157,19 @@ class ServiceTests(unittest.TestCase):
         self.assertAlmostEqual(put["年化報酬率"], 3.8 / 55 / put["DTE"] * 365)
         self.assertAlmostEqual(call["年化報酬率"], 6.8 / 60 / call["DTE"] * 365)
         self.assertEqual(put["通知狀態"], "初次基準")
+
+    def test_dividend_yield_warning_is_written_to_data_status(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc)
+
+        RefreshService(repository, DividendWarningProvider()).refresh(
+            force=True, now=now
+        )
+
+        rows = repository.chain_updates[scan.scan_id]
+        self.assertTrue(rows)
+        self.assertIn("股息率資料異常", rows[0]["資料狀態"])
 
     def test_later_new_match_creates_aggregated_pending_payload(self):
         scan = make_scan(baseline=True)
