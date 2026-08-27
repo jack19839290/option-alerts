@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root { color-scheme: light; font-family: Arial, "Noto Sans TC", sans-serif; }
+      body { margin: 0; background: #f8fafc; color: #111827; }
+      main { max-width: 620px; margin: 0 auto; padding: 24px; }
+      h1 { margin: 0 0 6px; font-size: 24px; }
+      .sub { margin: 0 0 22px; color: #64748b; line-height: 1.5; }
+      form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: white; padding: 22px; border: 1px solid #e5e7eb; border-radius: 12px; }
+      label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+      .full { grid-column: 1 / -1; }
+      input, select, textarea { box-sizing: border-box; width: 100%; padding: 10px 11px; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; background: white; }
+      input:focus, select:focus, textarea:focus { outline: 2px solid #93c5fd; border-color: #2563eb; }
+      textarea { min-height: 72px; resize: vertical; }
+      .check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+      .check input { width: auto; }
+      button { grid-column: 1 / -1; border: 0; border-radius: 8px; padding: 11px 16px; background: #2563eb; color: white; font-weight: 700; cursor: pointer; }
+      button:disabled { background: #94a3b8; cursor: wait; }
+      #status { grid-column: 1 / -1; min-height: 22px; padding: 9px 11px; border-radius: 7px; display: none; }
+      #status.ok { display: block; background: #dcfce7; color: #166534; }
+      #status.error { display: block; background: #fee2e2; color: #991b1b; }
+      .hint { color: #64748b; font-size: 12px; font-weight: 400; }
+      @media (max-width: 560px) { form { grid-template-columns: 1fr; } .full { grid-column: 1; } button, #status { grid-column: 1; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>選擇權警示設定</h1>
+      <p class="sub">一個股票＋一個到期日會建立一張工作表；相同合約再次送出時更新原設定。</p>
+      <form id="monitorForm">
+        <label>股票代號
+          <input name="ticker" required maxlength="15" placeholder="MU" autocomplete="off">
+        </label>
+        <label>到期日
+          <input name="expiry" type="date" required>
+        </label>
+        <label>類型
+          <select name="optionType"><option>CALL</option><option>PUT</option></select>
+        </label>
+        <label>履約價
+          <input name="strike" type="number" min="0.0001" step="0.0001" required placeholder="55">
+        </label>
+        <label>低於警示價
+          <input name="lowThreshold" type="number" min="0.0001" step="0.0001" placeholder="2.50">
+          <span class="hint">可留空</span>
+        </label>
+        <label>高於警示價
+          <input name="highThreshold" type="number" min="0.0001" step="0.0001" placeholder="4.00">
+          <span class="hint">可留空</span>
+        </label>
+        <label class="check full"><input name="emailEnabled" type="checkbox" checked>啟用 Email 通知</label>
+        <label class="full">備註
+          <textarea name="note" maxlength="500" placeholder="選填"></textarea>
+        </label>
+        <button id="submitButton" type="submit">儲存監控</button>
+        <div id="status"></div>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById('monitorForm');
+      const button = document.getElementById('submitButton');
+      const statusBox = document.getElementById('status');
+
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        button.disabled = true;
+        statusBox.className = '';
+        statusBox.style.display = 'none';
+        const data = Object.fromEntries(new FormData(form).entries());
+        data.emailEnabled = form.elements.emailEnabled.checked;
+        google.script.run
+          .withSuccessHandler(result => {
+            button.disabled = false;
+            statusBox.textContent = `${result.message}：${result.monitorId}，工作表 ${result.sheetName}`;
+            statusBox.className = 'ok';
+          })
+          .withFailureHandler(error => {
+            button.disabled = false;
+            statusBox.textContent = error && error.message ? error.message : String(error);
+            statusBox.className = 'error';
+          })
+          .submitMonitor(data);
+      });
+    </script>
+  </body>
+</html>
+

@@ -1,0 +1,13 @@
+.gcloudignore
+.git
+.gitignore
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+outputs/
+scripts/
+apps-script/
+tests/
+gha-creds-*.json

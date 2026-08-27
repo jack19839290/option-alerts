@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+tests
+outputs
+scripts
+apps-script
+*.xlsx
+*.png
+gha-creds-*.json
+service-account*.json
+credentials*.json
+google-credentials*.json
+*-key.json

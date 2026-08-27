@@ -1,0 +1,44 @@
+name: Option alerts refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub Actions 的最短排程間隔為 5 分鐘；避開整點以降低排程壅塞機率。
+    - cron: '2/5 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: option-alerts-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+      MAX_MONITOR_ROWS: '1000'
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Authenticate to Google Sheets
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Refresh option alerts
+        run: python -m app.run_once
+
