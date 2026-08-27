@@ -29,6 +29,13 @@ class SchemaConsistencyTests(unittest.TestCase):
         self.assertIsNotNone(apps_block)
         self.assertEqual(quoted_values(apps_block.group(1)), CHAIN_HEADERS)
 
+    def test_apps_script_does_not_fill_empty_scan_rows_with_false(self):
+        code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
+
+        self.assertNotIn(".insertCheckboxes()", code)
+        self.assertIn("firstAvailableRow", code)
+        self.assertIn("clearPlaceholderCheckboxValues_", code)
+
 
 if __name__ == "__main__":
     unittest.main()

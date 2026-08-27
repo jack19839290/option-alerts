@@ -28,6 +28,20 @@ def _sheet_range(sheet_name: str, cell_range: str) -> str:
     return f"'{escaped}'!{cell_range}"
 
 
+def _is_blank_scan_row(headers: list[str], row: list[Any]) -> bool:
+    """Ignore placeholder checkbox values on otherwise empty scan rows."""
+    padded = row + [""] * max(0, len(headers) - len(row))
+    values = dict(zip(headers, padded))
+    meaningful_headers = [
+        header
+        for header in SCAN_HEADERS[:15]
+        if header not in {"啟用", "Email通知"}
+    ]
+    return not any(
+        value not in (None, "") for value in (values.get(header) for header in meaningful_headers)
+    )
+
+
 class SheetsRepository:
     def __init__(self, spreadsheet_id: str, max_monitor_rows: int = 1000):
         from google.auth import default
@@ -110,7 +124,7 @@ class SheetsRepository:
         scans: list[ScanRecord] = []
         invalid: list[dict[str, Any]] = []
         for row_number, row in enumerate(values[1:], start=2):
-            if not any(str(value).strip() for value in row):
+            if _is_blank_scan_row(headers, row):
                 continue
             try:
                 scans.append(ScanRecord.from_values(row_number, headers, row))

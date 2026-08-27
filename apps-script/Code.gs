@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.3.0',
+  VERSION: '0.3.1',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -79,10 +79,14 @@ function submitScan(payload) {
     const values = sheet.getDataRange().getValues();
     const idColumn = APP.SCAN_HEADERS.indexOf('掃描ID');
     let rowNumber = -1;
+    let firstAvailableRow = -1;
     for (let row = 1; row < values.length; row += 1) {
       if (String(values[row][idColumn] || '') === input.scanId) {
         rowNumber = row + 1;
         break;
+      }
+      if (firstAvailableRow === -1 && !hasScanData_(values[row])) {
+        firstAvailableRow = row + 1;
       }
     }
 
@@ -105,7 +109,12 @@ function submitScan(payload) {
     ]];
 
     const isNew = rowNumber === -1;
-    if (isNew) rowNumber = Math.max(sheet.getLastRow() + 1, 2);
+    if (isNew) rowNumber = firstAvailableRow === -1
+      ? Math.max(sheet.getLastRow() + 1, 2)
+      : firstAvailableRow;
+    if (rowNumber > sheet.getMaxRows()) {
+      sheet.insertRowsAfter(sheet.getMaxRows(), rowNumber - sheet.getMaxRows());
+    }
     sheet.getRange(rowNumber, 1, 1, APP.SCAN_HEADERS.length).clearContent();
     sheet.getRange(rowNumber, 1, 1, inputValues[0].length).setValues(inputValues);
     sheet.getRange(rowNumber, 16).setValue('待抓取');
@@ -145,7 +154,7 @@ function setupSystem() {
   if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
   installEmailTrigger_();
   applyScanFormatting_();
-  spreadsheet.toast('系統已初始化／升級至 0.3.0；既有舊版資料如有存在會另外保留', '選擇權警示', 7);
+  spreadsheet.toast('系統已初始化／升級至 0.3.1；既有舊版資料如有存在會另外保留', '選擇權警示', 7);
 }
 
 function requestNextRefresh() {
@@ -500,8 +509,13 @@ function applyScanFormatting_() {
     .setFontWeight('bold')
     .setFontColor('#111827')
     .setWrap(true);
-  sheet.getRange('A2:A1000').insertCheckboxes();
-  sheet.getRange('N2:N1000').insertCheckboxes();
+  clearPlaceholderCheckboxValues_(sheet);
+  const checkboxRule = SpreadsheetApp.newDataValidation()
+    .requireCheckbox()
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange('A2:A1000').setDataValidation(checkboxRule);
+  sheet.getRange('N2:N1000').setDataValidation(checkboxRule);
   sheet.getRange('E2:E1000').setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(['ALL', 'CALL', 'PUT'], true).setAllowInvalid(false).build()
   );
@@ -525,6 +539,37 @@ function applyScanFormatting_() {
     SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($U2,"不足|過期|限制|失敗|無資料")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
+}
+
+function hasScanData_(row) {
+  const meaningfulIndexes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14];
+  return meaningfulIndexes.some(index => row[index] !== '' && row[index] !== null);
+}
+
+function clearPlaceholderCheckboxValues_(sheet) {
+  const endRow = Math.min(1000, sheet.getMaxRows());
+  if (endRow < 2) return;
+  const values = sheet.getRange(2, 1, endRow - 1, APP.SCAN_HEADERS.length).getValues();
+  const blankRows = [];
+  values.forEach((row, index) => {
+    if (!hasScanData_(row)) blankRows.push(index + 2);
+  });
+  if (!blankRows.length) return;
+
+  const ranges = [];
+  let start = blankRows[0];
+  let previous = start;
+  for (let index = 1; index <= blankRows.length; index += 1) {
+    const current = blankRows[index];
+    if (current === previous + 1) {
+      previous = current;
+      continue;
+    }
+    ranges.push(`A${start}:A${previous}`, `N${start}:N${previous}`);
+    start = current;
+    previous = current;
+  }
+  sheet.getRangeList(ranges).clearContent();
 }
 
 function applyChainConditionalFormatting_(sheet) {

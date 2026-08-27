@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.3.0`
+目前版本：`0.3.1`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算 Greeks 與賣出權利金年化報酬率，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 
