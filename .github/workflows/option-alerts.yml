@@ -3,8 +3,8 @@ name: Option alerts refresh
 on:
   workflow_dispatch:
   schedule:
-    # GitHub Actions 的最短排程間隔為 5 分鐘；避開整點以降低排程壅塞機率。
-    - cron: '2/5 * * * *'
+    # 明確列出每 5 分鐘的執行時間，並避開整點以降低排程壅塞機率。
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
 
 permissions:
   contents: read
@@ -41,4 +41,3 @@ jobs:
 
       - name: Refresh option alerts
         run: python -m app.run_once
-
