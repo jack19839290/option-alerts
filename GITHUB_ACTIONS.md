@@ -4,18 +4,20 @@
 
 ## 執行頻率
 
-- GitHub Actions 每 5 分鐘啟動一次。
-- 美股開盤時，每次都更新，因此實際頻率約 5 分鐘。
-- 盤外由程式檢查「設定 → 盤外更新間隔」，預設 10 分鐘；中間的工作流程會安全跳過。
+- Apps Script 每 5 分鐘做一次輕量檢查，但每個小時只會啟動 GitHub Actions 一次。
+- 自動更新通常落在整點後約 0～5 分鐘；Apps Script 時間觸發器不保證精確到秒。
+- Google Sheet 選單與控制台均提供立即手動更新。
+- 0.4.0 過渡期暫時保留每小時一次的 GitHub 原生排程；Apps Script 成功啟動兩次後再移除。
 - GitHub 排程不是即時服務，繁忙時可能延遲或偶爾漏跑。
 
 ## 0. 確認 Google Sheet 與 Apps Script
 
 1. 在目標 Google Sheet 的「擴充功能 → Apps Script」放入本專案 `apps-script/Code.gs` 與 `apps-script/Index.html`。
-2. 重新整理 Google Sheet，從「選擇權警示」選單執行「初始化／修復系統」。
-3. 第一次執行時完成 Google 授權；這會建立每分鐘處理待寄 Email 的 Apps Script 觸發器。
+2. 同時新增本專案 `apps-script/GitHubSetup.html`，並更新 `apps-script/appsscript.json` 權限。
+3. 重新整理 Google Sheet，從「選擇權警示」選單執行「初始化／升級系統」。
+4. 第一次執行時完成 Google 授權；系統會建立 Email、每小時更新檢查與控制台手動更新三個觸發器。
 
-若是全新安裝，請確認 Apps Script 的 `APP.VERSION` 為 `0.3.0`。若從 0.2.1 升級，請依本文最後的升級連結操作。
+請確認 Apps Script 的 `APP.VERSION` 為 `0.4.0`。升級步驟請見 [UPGRADE_0.4.md](UPGRADE_0.4.md)。
 
 ## 1. 建立不綁計費的 Google Cloud Project
 
@@ -61,6 +63,16 @@ Google Sheets API 的標準用量不需要額外付費，也不需要啟用 Clou
 
 若出現 `PERMISSION_DENIED`，通常是尚未把 Sheet 分享給服務帳戶，或分享的 Email 與 JSON 內的 `client_email` 不一致。
 
+## 4. 設定 Apps Script 啟動金鑰
+
+1. 在 GitHub 開啟「Settings → Developer settings → Personal access tokens → Fine-grained tokens」。
+2. 建立有效期 90 天的新金鑰，只允許存取 `jack19839290/option-alerts`。
+3. Repository permissions 只需把 **Actions** 設為 **Read and write**。
+4. 回到 Google Sheet，選擇「選擇權警示 → 設定 GitHub 自動更新金鑰」。
+5. 貼上金鑰並確認到期日後按「驗證並儲存」。請勿把金鑰放進儲存格、聊天或 Email。
+6. 執行一次「立即手動更新」，確認 GitHub Actions 出現綠色勾勾且 Sheet 資料更新。
+7. 等待兩個整點更新；「設定」中的「Apps Script 成功啟動次數」達到 2 後，才移除 workflow 的原生 `schedule`。
+
 ## 注意事項
 
 - GitHub 公開 repository 使用標準執行器目前免費；私人 repository 會消耗每月免費分鐘。
@@ -68,6 +80,6 @@ Google Sheets API 的標準用量不需要額外付費，也不需要啟用 Clou
 - `GOOGLE_CREDENTIALS` 是長期金鑰。若懷疑外洩，立即在 Google Cloud Console 刪除該金鑰並建立新金鑰。
 - 不要在 workflow 中輸出 secret，也不要把 `gha-creds-*.json` 加入版本控制。
 
-## 從 0.2.1 升級
+## 升級
 
-既有使用者不需重建 Secrets 或服務帳戶。請依 [UPGRADE_0.3.md](UPGRADE_0.3.md) 更新 Apps Script、執行 `setupSystem`，再重新執行一次 workflow。
+既有使用者不需重建 `GOOGLE_CREDENTIALS`、`SPREADSHEET_ID` 或服務帳戶。請依 [UPGRADE_0.4.md](UPGRADE_0.4.md) 更新 Apps Script；程式不會刪除或修改舊版分頁。

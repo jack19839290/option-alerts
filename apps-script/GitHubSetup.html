@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <style>
+      body { font-family: Arial, sans-serif; color: #1f2937; margin: 0; padding: 22px; }
+      h2 { color: #1d4ed8; font-size: 20px; margin: 0 0 10px; }
+      p, li { font-size: 13px; line-height: 1.55; }
+      .notice { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 12px; }
+      .warning { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 12px; }
+      label { display: block; font-weight: 700; margin: 16px 0 6px; }
+      input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
+      input[type="password"] { font-family: monospace; }
+      .buttons { display: flex; gap: 10px; margin-top: 20px; }
+      button { border: 0; border-radius: 6px; padding: 10px 16px; cursor: pointer; font-weight: 700; }
+      #save { background: #2563eb; color: white; }
+      #cancel { background: #e5e7eb; color: #111827; }
+      #status { min-height: 22px; margin-top: 14px; font-size: 13px; }
+      .ok { color: #166534; }
+      .error { color: #b91c1c; }
+      .small { color: #64748b; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h2>GitHub 每小時自動更新</h2>
+    <div class="notice">
+      請使用只限 <strong>jack19839290/option-alerts</strong>、有效期 90 天，且 Actions 權限為
+      <strong>Read and write</strong> 的 fine-grained personal access token。
+    </div>
+    <p class="warning">金鑰只會儲存在你的 Apps Script 個人屬性，不會寫入 Google Sheet、程式紀錄或 GitHub repository。請勿把金鑰貼到聊天或 Email。</p>
+
+    <form id="form">
+      <label for="token">GitHub 金鑰</label>
+      <input id="token" type="password" autocomplete="off" required placeholder="github_pat_...">
+
+      <label for="expiresOn">金鑰到期日</label>
+      <input id="expiresOn" type="date" required value="<?= defaultExpiry ?>">
+      <div class="small">
+        <? if (isConfigured) { ?>目前已設定金鑰<? if (currentExpiry) { ?>，記錄的到期日為 <?= currentExpiry ?><? } ?>。儲存後會取代原金鑰。<? } else { ?>建議使用上方預設的 90 天到期日。<? } ?>
+      </div>
+
+      <div class="buttons">
+        <button id="save" type="submit">驗證並儲存</button>
+        <button id="cancel" type="button" onclick="google.script.host.close()">取消</button>
+      </div>
+      <div id="status"></div>
+    </form>
+
+    <script>
+      const setupNonce = <?!= JSON.stringify(setupNonce) ?>;
+      const form = document.getElementById('form');
+      const statusBox = document.getElementById('status');
+      const saveButton = document.getElementById('save');
+
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        saveButton.disabled = true;
+        statusBox.className = '';
+        statusBox.textContent = '正在驗證 GitHub 金鑰…';
+        google.script.run
+          .withSuccessHandler(result => {
+            statusBox.className = 'ok';
+            statusBox.textContent = result.message;
+            saveButton.disabled = false;
+            document.getElementById('token').value = '';
+          })
+          .withFailureHandler(error => {
+            statusBox.className = 'error';
+            statusBox.textContent = error && error.message ? error.message : String(error);
+            saveButton.disabled = false;
+          })
+          .saveGitHubAutomationConfig({
+            token: document.getElementById('token').value,
+            expiresOn: document.getElementById('expiresOn').value,
+            nonce: setupNonce,
+          });
+      });
+    </script>
+  </body>
+</html>

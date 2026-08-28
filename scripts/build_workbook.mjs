@@ -77,17 +77,32 @@ dashboard.getRange("A7:A10").format = { fill: "#F8FAFC", font: { bold: true } };
 dashboard.getRange("B7:B10").format = { font: { color: "#008000" } };
 dashboard.getRange("A7:B10").format.borders = { preset: "outside", style: "thin", color: "#CBD5E1" };
 
+dashboard.getRange("F7:H10").values = [
+  ["立即手動更新", "勾選右側核取方塊", false],
+  ["GitHub 自動更新", "", "='設定'!$B$20"],
+  ["金鑰到期日", "", "='設定'!$B$21"],
+  ["最後要求狀態", "", "='設定'!$B$23"],
+];
+dashboard.getRange("H8").formulas = [["='設定'!$B$20"]];
+dashboard.getRange("H9").formulas = [["='設定'!$B$21"]];
+dashboard.getRange("H10").formulas = [["='設定'!$B$23"]];
+dashboard.getRange("F7:F10").format = { fill: "#F8FAFC", font: { bold: true } };
+dashboard.getRange("G7:G10").format = { font: { color: "#475569", size: 9 }, wrapText: true };
+dashboard.getRange("H7").format = { fill: "#DBEAFE", horizontalAlignment: "center" };
+dashboard.getRange("H8:H10").format = { font: { color: "#008000" }, wrapText: true };
+dashboard.getRange("H7").dataValidation = { rule: { type: "list", values: ["TRUE", "FALSE"] } };
+
 dashboard.getRange("A12:H12").merge();
 dashboard.getRange("A12").values = [["使用方式"]];
 dashboard.getRange("A12:H12").format = { fill: "#E5E7EB", font: { bold: true } };
 dashboard.getRange("A13:H18").merge(true);
 dashboard.getRange("A13:A18").values = [
   ["1. 在 Google Sheets 選單「選擇權警示」執行「初始化／升級系統」。"],
-  ["2. 在「設定」填入固定通知信箱。"],
+  ["2. 在「設定」填入固定通知信箱，再從選單設定 90 天 GitHub 金鑰。"],
   ["3. 透過表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。"],
-  ["4. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。"],
-  ["5. 年化報酬率只用有效 Bid；PUT 以履約價、CALL 以持股成本作為本金。"],
-  ["6. 本工具只供個人研究與監控，不會執行任何交易。"],
+  ["4. 每小時整點後約 0～5 分鐘自動更新；也可勾選 H7 立即手動更新。"],
+  ["5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。"],
+  ["6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。"],
 ];
 dashboard.getRange("A13:H18").format = { wrapText: true, rowHeight: 27, verticalAlignment: "center" };
 
@@ -196,19 +211,25 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.3.0", "目前規格版本"],
+  ["系統版本", "0.4.0", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
   ["最後執行(UTC)", "", "系統管理"],
   ["最後狀態", "尚未執行", "系統管理"],
+  ["GitHub 自動更新", "尚未設定", "金鑰只存於 Apps Script 個人屬性，不會寫入儲存格"],
+  ["GitHub 金鑰到期日", "", "只記錄使用者輸入的到期日，用於提前 7 天提醒"],
+  ["GitHub 最後要求(UTC)", "", "Apps Script 最近一次要求 GitHub 執行的時間"],
+  ["GitHub 最後要求狀態", "尚未執行", "成功、失敗或尚未設定"],
+  ["Apps Script 成功啟動次數", 0, "自動更新成功累計；達 2 次後可移除 GitHub 原生 cron"],
+  ["GitHub 原生排程", "保留中", "Apps Script 自動更新成功 2 次前保留作為安全網"],
 ];
-settings.getRange("A1:C19").values = settingsRows;
+settings.getRange("A1:C25").values = settingsRows;
 settings.getRange("A1:C1").format = { fill: "#E5E7EB", font: { bold: true } };
 settings.getRange("B2:B14").format.font = { color: "#0000FF" };
 settings.getRange("B8:B9").format.numberFormat = "0.0%";
-settings.getRange("A1:C19").format.borders = { preset: "outside", style: "thin", color: "#CBD5E1" };
-settings.getRange("C2:C19").format = { wrapText: true, font: { color: "#475569" } };
+settings.getRange("A1:C25").format.borders = { preset: "outside", style: "thin", color: "#CBD5E1" };
+settings.getRange("C2:C25").format = { wrapText: true, font: { color: "#475569" } };
 settings.getRange("A:A").format.columnWidthPx = 190;
 settings.getRange("B:B").format.columnWidthPx = 250;
 settings.getRange("C:C").format.columnWidthPx = 330;

@@ -1,12 +1,30 @@
 const APP = Object.freeze({
-  VERSION: '0.3.2',
+  VERSION: '0.4.0',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
-    LEGACY_MONITORS: '監控清單',
     SETTINGS: '設定',
     ALERTS: '警示紀錄',
     SYSTEM: '系統紀錄',
+  },
+  GITHUB: {
+    OWNER: 'jack19839290',
+    REPOSITORY: 'option-alerts',
+    WORKFLOW: 'option-alerts.yml',
+    REF: 'main',
+  },
+  PROPERTIES: {
+    TOKEN: 'GITHUB_ACTIONS_TOKEN',
+    TOKEN_EXPIRES_ON: 'GITHUB_ACTIONS_TOKEN_EXPIRES_ON',
+    SETUP_NONCE: 'GITHUB_SETUP_NONCE',
+    LAST_AUTO_HOUR: 'GITHUB_LAST_AUTO_ATTEMPT_HOUR',
+    LAST_DISPATCH_AT: 'GITHUB_LAST_DISPATCH_AT',
+    LAST_DISPATCH_STATUS: 'GITHUB_LAST_DISPATCH_STATUS',
+    AUTOMATIC_SUCCESS_COUNT: 'GITHUB_AUTOMATIC_SUCCESS_COUNT',
+    FAILURE_ACTIVE: 'GITHUB_FAILURE_ACTIVE',
+    LAST_FAILURE_NOTICE_AT: 'GITHUB_LAST_FAILURE_NOTICE_AT',
+    LAST_EXPIRY_NOTICE_DATE: 'GITHUB_LAST_EXPIRY_NOTICE_DATE',
+    CRON_REMOVAL_READY_NOTIFIED: 'GITHUB_CRON_REMOVAL_READY_NOTIFIED',
   },
   SCAN_HEADERS: [
     '啟用', '掃描ID', '股票代號', '到期日', '顯示類型', 'Delta條件', 'Delta門檻',
@@ -33,7 +51,8 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('選擇權警示')
     .addItem('新增／更新期權鍊掃描', 'showScanDialog')
-    .addItem('要求下一輪立即更新', 'requestNextRefresh')
+    .addItem('立即手動更新', 'runManualRefresh')
+    .addItem('設定 GitHub 自動更新金鑰', 'showGitHubSetupDialog')
     .addSeparator()
     .addItem('初始化／升級系統', 'setupSystem')
     .addToUi();
@@ -54,11 +73,6 @@ function showScanDialog() {
     .setWidth(650)
     .setHeight(860);
   SpreadsheetApp.getUi().showModalDialog(output, '新增／更新期權鍊掃描');
-}
-
-// 保留舊選單或舊連結的相容性。
-function showMonitorDialog() {
-  showScanDialog();
 }
 
 function getFormDefaults() {
@@ -123,28 +137,25 @@ function submitScan(payload) {
     sheet.getRange(rowNumber, 26).setValue(false);
     applyScanFormatting_();
     ensureChainSheet_(input.sheetName);
-    requestNextRefresh();
+    prepareNextRefresh_();
 
     return {
       ok: true,
       scanId: input.scanId,
       sheetName: input.sheetName,
-      message: isNew ? '掃描已新增；第一次抓取只建立基準，不寄信' : '掃描設定已更新；下一次抓取會重新建立基準',
+      message: isNew
+        ? '掃描已新增；第一次抓取只建立基準、不寄信。可按「立即手動更新」或等待每小時自動更新。'
+        : '掃描設定已更新；下一次抓取會重新建立基準。可按「立即手動更新」或等待每小時自動更新。',
     };
   } finally {
     lock.releaseLock();
   }
 }
 
-function submitMonitor(payload) {
-  return submitScan(payload);
-}
-
 function setupSystem() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   if (!spreadsheet) throw new Error('請從綁定的 Google Sheet 執行初始化');
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', spreadsheet.getId());
-  migrateLegacySheets_();
   ensureSystemSheets_();
   const settingsSheet = spreadsheet.getSheetByName(APP.SHEETS.SETTINGS);
   const settings = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 2).getValues();
@@ -152,12 +163,13 @@ function setupSystem() {
   if (spreadsheetIdRow >= 0) settingsSheet.getRange(spreadsheetIdRow + 2, 2).setValue(spreadsheet.getId());
   const versionRow = settings.findIndex(row => row[0] === '系統版本');
   if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
-  installEmailTrigger_();
+  installAutomationTriggers_();
   applyScanFormatting_();
-  spreadsheet.toast('系統已初始化／升級至 0.3.2；既有舊版資料如有存在會另外保留', '選擇權警示', 7);
+  refreshGitHubStatusSettings_();
+  spreadsheet.toast('系統已初始化／升級至 0.4.0；未刪除或更動任何舊版分頁', '選擇權警示', 7);
 }
 
-function requestNextRefresh() {
+function prepareNextRefresh_() {
   const spreadsheet = getSpreadsheet_();
   const settingsSheet = spreadsheet.getSheetByName(APP.SHEETS.SETTINGS);
   if (!settingsSheet) return;
@@ -167,7 +179,6 @@ function requestNextRefresh() {
       settingsSheet.getRange(index + 2, 2).clearContent();
     }
   });
-  spreadsheet.toast('雲端服務會在下一次排程更新', '已送出要求', 5);
 }
 
 function processPendingEmails() {
@@ -365,7 +376,6 @@ function parseOptionalPositiveNumber_(value, label) {
 
 function ensureSystemSheets_() {
   const spreadsheet = getSpreadsheet_();
-  migrateLegacySheets_();
   const definitions = [
     [APP.SHEETS.DASHBOARD, ['選擇權警示控制台']],
     [APP.SHEETS.SCANS, APP.SCAN_HEADERS],
@@ -381,28 +391,6 @@ function ensureSystemSheets_() {
   });
   seedSettings_();
   seedDashboard_();
-}
-
-function migrateLegacySheets_() {
-  const spreadsheet = getSpreadsheet_();
-  const legacyMonitor = spreadsheet.getSheetByName(APP.SHEETS.LEGACY_MONITORS);
-  if (legacyMonitor) legacyMonitor.setName(nextAvailableSheetName_('監控清單_舊版'));
-
-  const alertSheet = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
-  if (alertSheet && alertSheet.getLastColumn() > 0) {
-    const headers = alertSheet.getRange(1, 1, 1, alertSheet.getLastColumn()).getValues()[0];
-    if (headers.includes('監控ID') && !headers.includes('掃描ID')) {
-      alertSheet.setName(nextAvailableSheetName_('警示紀錄_舊版'));
-    }
-  }
-}
-
-function nextAvailableSheetName_(baseName) {
-  const spreadsheet = getSpreadsheet_();
-  if (!spreadsheet.getSheetByName(baseName)) return baseName;
-  let number = 2;
-  while (spreadsheet.getSheetByName(`${baseName}_${number}`)) number += 1;
-  return `${baseName}_${number}`;
 }
 
 function seedSettings_() {
@@ -426,6 +414,12 @@ function seedSettings_() {
     ['最後成功抓取(UTC)', '', '系統管理'],
     ['最後執行(UTC)', '', '系統管理'],
     ['最後狀態', '尚未執行', '系統管理'],
+    ['GitHub 自動更新', '尚未設定', '金鑰只存於 Apps Script 個人屬性，不會寫入儲存格'],
+    ['GitHub 金鑰到期日', '', '只記錄使用者輸入的到期日，用於提前 7 天提醒'],
+    ['GitHub 最後要求(UTC)', '', 'Apps Script 最近一次要求 GitHub 執行的時間'],
+    ['GitHub 最後要求狀態', '尚未執行', '成功、失敗或尚未設定'],
+    ['Apps Script 成功啟動次數', 0, '自動更新成功累計；達 2 次後可移除 GitHub 原生 cron'],
+    ['GitHub 原生排程', '保留中', 'Apps Script 自動更新成功 2 次前保留作為安全網'],
   ];
   const existing = sheet.getLastRow() >= 2
     ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues()
@@ -460,15 +454,31 @@ function seedDashboard_() {
   sheet.getRange('B10').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("系統版本",\'設定\'!$A$2:$A$40,0)),"")');
   sheet.getRange('A7:A10').setBackground('#F8FAFC').setFontWeight('bold');
   sheet.getRange('B7:B10').setFontColor('#008000');
+  sheet.getRange('F7:G10').setValues([
+    ['立即手動更新', '勾選右側核取方塊'],
+    ['GitHub 自動更新', ''],
+    ['金鑰到期日', ''],
+    ['最後要求狀態', ''],
+  ]);
+  const manualCell = sheet.getRange('H7');
+  manualCell.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  if (manualCell.getValue() !== true) manualCell.setValue(false);
+  sheet.getRange('H8').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$50,MATCH("GitHub 自動更新",\'設定\'!$A$2:$A$50,0)),"")');
+  sheet.getRange('H9').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$50,MATCH("GitHub 金鑰到期日",\'設定\'!$A$2:$A$50,0)),"")');
+  sheet.getRange('H10').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$50,MATCH("GitHub 最後要求狀態",\'設定\'!$A$2:$A$50,0)),"")');
+  sheet.getRange('F7:F10').setBackground('#F8FAFC').setFontWeight('bold');
+  sheet.getRange('G7:G10').setFontColor('#475569').setFontSize(9).setWrap(true);
+  sheet.getRange('H8:H10').setFontColor('#008000').setWrap(true);
+  sheet.getRange('H7').setBackground('#DBEAFE').setHorizontalAlignment('center');
   sheet.getRange('A12:H12').merge().setValue('使用方式');
   sheet.getRange('A13:H18').mergeAcross();
   sheet.getRange('A13:A18').setValues([
     ['1. 從選單「選擇權警示」執行「初始化／升級系統」。'],
-    ['2. 在「設定」確認固定通知信箱。'],
+    ['2. 在「設定」確認固定通知信箱，再從選單設定 90 天 GitHub 金鑰。'],
     ['3. 用表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。'],
-    ['4. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。'],
-    ['5. 年化報酬率只用有效 Bid；PUT 以履約價、CALL 以持股成本作為本金。'],
-    ['6. 本工具只供個人研究與監控，不會執行任何交易。'],
+    ['4. 每小時整點後約 0～5 分鐘自動更新；也可勾選 H7 立即手動更新。'],
+    ['5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。'],
+    ['6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。'],
   ]);
   sheet.getRange('A1:H1').setBackground('#F1F5F9').setFontColor('#1D4ED8').setFontWeight('bold').setFontSize(18);
   sheet.getRange('A4:H4').setBackground('#E5E7EB').setFontWeight('bold');
@@ -589,9 +599,335 @@ function getSettings_() {
   );
 }
 
-function installEmailTrigger_() {
-  const exists = ScriptApp.getProjectTriggers().some(trigger => trigger.getHandlerFunction() === 'processPendingEmails');
-  if (!exists) ScriptApp.newTrigger('processPendingEmails').timeBased().everyMinutes(1).create();
+function showGitHubSetupDialog() {
+  ensureSystemSheets_();
+  const properties = PropertiesService.getUserProperties();
+  const nonce = Utilities.getUuid();
+  properties.setProperty(APP.PROPERTIES.SETUP_NONCE, JSON.stringify({
+    value: nonce,
+    createdAt: Date.now(),
+  }));
+  const template = HtmlService.createTemplateFromFile('GitHubSetup');
+  template.setupNonce = nonce;
+  template.defaultExpiry = Utilities.formatDate(
+    new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+    'Asia/Taipei',
+    'yyyy-MM-dd'
+  );
+  template.isConfigured = Boolean(properties.getProperty(APP.PROPERTIES.TOKEN));
+  template.currentExpiry = properties.getProperty(APP.PROPERTIES.TOKEN_EXPIRES_ON) || '';
+  SpreadsheetApp.getUi().showModalDialog(
+    template.evaluate().setWidth(620).setHeight(650),
+    '設定 GitHub 自動更新金鑰'
+  );
+}
+
+function saveGitHubAutomationConfig(payload) {
+  const input = payload || {};
+  validateGitHubSetupNonce_(input.nonce);
+  const token = String(input.token || '').trim();
+  const expiresOn = String(input.expiresOn || '').trim();
+  if (!/^(github_pat_|ghp_)[A-Za-z0-9_]+$/.test(token)) {
+    throw new Error('金鑰格式不正確；請貼上 GitHub fine-grained personal access token');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) throw new Error('請填寫金鑰到期日');
+  const expiry = new Date(`${expiresOn}T23:59:59+08:00`);
+  if (isNaN(expiry.getTime()) || expiry.getTime() <= Date.now()) throw new Error('金鑰到期日必須晚於今天');
+  if (expiry.getTime() - Date.now() > 91 * 24 * 60 * 60 * 1000) {
+    throw new Error('依目前設定，金鑰有效期請勿超過 90 天');
+  }
+
+  testGitHubAccess_(token);
+  const properties = PropertiesService.getUserProperties();
+  properties.setProperties({
+    [APP.PROPERTIES.TOKEN]: token,
+    [APP.PROPERTIES.TOKEN_EXPIRES_ON]: expiresOn,
+    [APP.PROPERTIES.LAST_AUTO_HOUR]: Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd-HH'),
+    [APP.PROPERTIES.AUTOMATIC_SUCCESS_COUNT]: '0',
+  }, false);
+  properties.deleteProperty(APP.PROPERTIES.SETUP_NONCE);
+  properties.deleteProperty(APP.PROPERTIES.FAILURE_ACTIVE);
+  properties.deleteProperty(APP.PROPERTIES.LAST_FAILURE_NOTICE_AT);
+  properties.deleteProperty(APP.PROPERTIES.LAST_EXPIRY_NOTICE_DATE);
+  properties.deleteProperty(APP.PROPERTIES.CRON_REMOVAL_READY_NOTIFIED);
+  installAutomationTriggers_();
+  refreshGitHubStatusSettings_();
+  appendSystemLog_('INFO', 'GitHub 自動更新已設定', `金鑰到期日 ${expiresOn}；金鑰內容未寫入工作表`);
+  return {
+    ok: true,
+    message: '設定完成。系統會從下一個整點開始每小時更新；也可立即使用手動更新。',
+  };
+}
+
+function validateGitHubSetupNonce_(nonce) {
+  const raw = PropertiesService.getUserProperties().getProperty(APP.PROPERTIES.SETUP_NONCE);
+  if (!raw) throw new Error('設定視窗已失效，請關閉後重新開啟');
+  let saved;
+  try {
+    saved = JSON.parse(raw);
+  } catch (error) {
+    throw new Error('設定驗證資料無效，請關閉後重新開啟');
+  }
+  if (String(nonce || '') !== String(saved.value || '') || Date.now() - Number(saved.createdAt || 0) > 15 * 60 * 1000) {
+    throw new Error('設定視窗已逾時，請關閉後重新開啟');
+  }
+}
+
+function testGitHubAccess_(token) {
+  const response = UrlFetchApp.fetch(gitHubWorkflowUrl_(), {
+    method: 'get',
+    headers: gitHubHeaders_(token),
+    muteHttpExceptions: true,
+  });
+  const code = response.getResponseCode();
+  if (code !== 200) throw new Error(describeGitHubError_(code, '無法驗證 GitHub 金鑰'));
+}
+
+function runManualRefresh() {
+  return runManualRefresh_(true);
+}
+
+function runManualRefresh_(showToast) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) {
+    if (showToast) getSpreadsheet_().toast('另一個更新要求正在處理，請稍候再試', '手動更新', 5);
+    return {ok: false, message: '另一個更新要求正在處理'};
+  }
+  try {
+    prepareNextRefresh_();
+    const result = dispatchGitHubWorkflow_('manual');
+    if (showToast) getSpreadsheet_().toast('GitHub 已接受要求；通常數分鐘後寫回資料', '手動更新已送出', 7);
+    return result;
+  } catch (error) {
+    if (showToast) getSpreadsheet_().toast(error.message || String(error), '手動更新失敗', 10);
+    return {ok: false, message: error.message || String(error)};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleDashboardAction(event) {
+  if (!event || !event.range) return;
+  const range = event.range;
+  if (range.getSheet().getName() !== APP.SHEETS.DASHBOARD || range.getA1Notation() !== 'H7') return;
+  if (range.getValue() !== true) return;
+  range.setValue(false);
+  runManualRefresh_(true);
+}
+
+function processHourlyGitHubDispatch() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return;
+  try {
+    const now = new Date();
+    checkGitHubTokenExpiry_(now);
+    const properties = PropertiesService.getUserProperties();
+    if (!properties.getProperty(APP.PROPERTIES.TOKEN)) {
+      setSettingsValues_({
+        'GitHub 自動更新': '尚未設定',
+        'GitHub 最後要求狀態': '尚未設定金鑰',
+      });
+      return;
+    }
+    const hourKey = Utilities.formatDate(now, 'Asia/Taipei', 'yyyy-MM-dd-HH');
+    if (properties.getProperty(APP.PROPERTIES.LAST_AUTO_HOUR) === hourKey) return;
+    properties.setProperty(APP.PROPERTIES.LAST_AUTO_HOUR, hourKey);
+    dispatchGitHubWorkflow_('automatic');
+  } catch (error) {
+    console.error(`GitHub 每小時更新失敗：${error.message || error}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function dispatchGitHubWorkflow_(mode) {
+  const properties = PropertiesService.getUserProperties();
+  const token = properties.getProperty(APP.PROPERTIES.TOKEN);
+  if (!token) throw new Error('尚未設定 GitHub 金鑰；請從選單執行「設定 GitHub 自動更新金鑰」');
+  const now = new Date();
+  let response;
+  try {
+    response = UrlFetchApp.fetch(`${gitHubWorkflowUrl_()}/dispatches`, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: gitHubHeaders_(token),
+      payload: JSON.stringify({ref: APP.GITHUB.REF}),
+      muteHttpExceptions: true,
+    });
+  } catch (error) {
+    const message = `無法連線至 GitHub：${error.message || error}`;
+    recordGitHubDispatchFailure_(now, mode, 0, message);
+    throw new Error(message);
+  }
+  const code = response.getResponseCode();
+  if (code !== 200 && code !== 204) {
+    const message = describeGitHubError_(code, 'GitHub 拒絕更新要求');
+    recordGitHubDispatchFailure_(now, mode, code, message);
+    throw new Error(message);
+  }
+  recordGitHubDispatchSuccess_(now, mode);
+  return {ok: true, mode: mode, statusCode: code};
+}
+
+function gitHubWorkflowUrl_() {
+  return `https://api.github.com/repos/${APP.GITHUB.OWNER}/${APP.GITHUB.REPOSITORY}/actions/workflows/${APP.GITHUB.WORKFLOW}`;
+}
+
+function gitHubHeaders_(token) {
+  return {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+}
+
+function describeGitHubError_(code, prefix) {
+  const advice = {
+    401: '金鑰無效或已到期，請重新建立並儲存',
+    403: '金鑰權限不足；請確認此 repository 的 Actions 權限為 Read and write',
+    404: '找不到 repository 或 workflow；請確認金鑰可存取 jack19839290/option-alerts',
+    422: 'GitHub 無法在 main 分支啟動這個 workflow',
+  }[code] || '請稍後重試並查看 GitHub Actions 狀態';
+  return `${prefix}（HTTP ${code}）：${advice}`;
+}
+
+function recordGitHubDispatchSuccess_(now, mode) {
+  const properties = PropertiesService.getUserProperties();
+  const wasFailing = properties.getProperty(APP.PROPERTIES.FAILURE_ACTIVE) === 'true';
+  const timestamp = now.toISOString();
+  properties.setProperty(APP.PROPERTIES.LAST_DISPATCH_AT, timestamp);
+  properties.setProperty(APP.PROPERTIES.LAST_DISPATCH_STATUS, '成功');
+  properties.deleteProperty(APP.PROPERTIES.FAILURE_ACTIVE);
+  properties.deleteProperty(APP.PROPERTIES.LAST_FAILURE_NOTICE_AT);
+
+  let successCount = Number(properties.getProperty(APP.PROPERTIES.AUTOMATIC_SUCCESS_COUNT) || 0);
+  if (mode === 'automatic') {
+    successCount += 1;
+    properties.setProperty(APP.PROPERTIES.AUTOMATIC_SUCCESS_COUNT, String(successCount));
+  }
+  const cronStatus = successCount >= 2 ? '可移除（Apps Script 已成功 2 次）' : '保留中';
+  setSettingsValues_({
+    'GitHub 自動更新': '已啟用（每小時）',
+    'GitHub 最後要求(UTC)': timestamp,
+    'GitHub 最後要求狀態': mode === 'automatic' ? '自動要求成功' : '手動要求成功',
+    'Apps Script 成功啟動次數': successCount,
+    'GitHub 原生排程': cronStatus,
+  });
+
+  if (wasFailing) {
+    appendSystemLog_('INFO', 'GitHub 更新要求已恢復', `${mode}；${timestamp}`);
+    sendSystemEmail_('【選擇權警示】自動更新已恢復', `GitHub 更新要求已在 ${timestamp} 恢復成功。`);
+  }
+  if (successCount >= 2 && properties.getProperty(APP.PROPERTIES.CRON_REMOVAL_READY_NOTIFIED) !== 'true') {
+    properties.setProperty(APP.PROPERTIES.CRON_REMOVAL_READY_NOTIFIED, 'true');
+    appendSystemLog_('INFO', 'Apps Script 自動更新驗證完成', '已成功啟動 2 次，可移除 GitHub 原生 cron');
+    sendSystemEmail_(
+      '【選擇權警示】Apps Script 自動更新已驗證完成',
+      'Apps Script 已成功啟動 GitHub Actions 兩次。GitHub 原生 cron 現在可以安全移除。'
+    );
+  }
+}
+
+function recordGitHubDispatchFailure_(now, mode, code, message) {
+  const properties = PropertiesService.getUserProperties();
+  const timestamp = now.toISOString();
+  const wasFailing = properties.getProperty(APP.PROPERTIES.FAILURE_ACTIVE) === 'true';
+  const lastNoticeAt = Number(properties.getProperty(APP.PROPERTIES.LAST_FAILURE_NOTICE_AT) || 0);
+  const shouldNotify = !wasFailing || now.getTime() - lastNoticeAt >= 24 * 60 * 60 * 1000;
+  properties.setProperty(APP.PROPERTIES.FAILURE_ACTIVE, 'true');
+  properties.setProperty(APP.PROPERTIES.LAST_DISPATCH_AT, timestamp);
+  properties.setProperty(APP.PROPERTIES.LAST_DISPATCH_STATUS, `失敗（HTTP ${code}）`);
+  setSettingsValues_({
+    'GitHub 自動更新': '異常',
+    'GitHub 最後要求(UTC)': timestamp,
+    'GitHub 最後要求狀態': message,
+  });
+  appendSystemLog_('ERROR', 'GitHub 更新要求失敗', `${mode}；${message}`);
+  if (shouldNotify && sendSystemEmail_('【選擇權警示】GitHub 自動更新失敗', `${message}\n\n發生時間：${timestamp}`)) {
+    properties.setProperty(APP.PROPERTIES.LAST_FAILURE_NOTICE_AT, String(now.getTime()));
+  }
+}
+
+function checkGitHubTokenExpiry_(now) {
+  const properties = PropertiesService.getUserProperties();
+  const expiresOn = properties.getProperty(APP.PROPERTIES.TOKEN_EXPIRES_ON);
+  if (!expiresOn) return;
+  const expiry = new Date(`${expiresOn}T23:59:59+08:00`);
+  if (isNaN(expiry.getTime())) return;
+  const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  if (daysLeft < 0 || daysLeft > 7) return;
+  if (properties.getProperty(APP.PROPERTIES.LAST_EXPIRY_NOTICE_DATE) === expiresOn) return;
+  const sent = sendSystemEmail_(
+    `【選擇權警示】GitHub 金鑰將在 ${daysLeft} 天內到期`,
+    `GitHub 自動更新金鑰預計於 ${expiresOn} 到期。請在到期前建立新金鑰，並從 Google Sheet 選單重新儲存。`
+  );
+  if (sent) properties.setProperty(APP.PROPERTIES.LAST_EXPIRY_NOTICE_DATE, expiresOn);
+}
+
+function sendSystemEmail_(subject, body) {
+  try {
+    const recipient = String(getSettings_()['通知信箱'] || '').trim();
+    if (!recipient) return false;
+    MailApp.sendEmail({to: recipient, subject: subject, body: body, name: '選擇權警示'});
+    return true;
+  } catch (error) {
+    console.error(`系統通知寄送失敗：${error.message || error}`);
+    return false;
+  }
+}
+
+function setSettingsValues_(updates) {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SETTINGS);
+  if (!sheet) return;
+  const rowCount = Math.max(sheet.getLastRow() - 1, 0);
+  const names = rowCount ? sheet.getRange(2, 1, rowCount, 1).getValues().map(row => String(row[0] || '')) : [];
+  Object.entries(updates).forEach(([name, value]) => {
+    const index = names.indexOf(name);
+    if (index >= 0) {
+      sheet.getRange(index + 2, 2).setValue(value);
+    } else {
+      sheet.appendRow([name, value, '系統管理']);
+      names.push(name);
+    }
+  });
+}
+
+function refreshGitHubStatusSettings_() {
+  const properties = PropertiesService.getUserProperties();
+  const configured = Boolean(properties.getProperty(APP.PROPERTIES.TOKEN));
+  const successCount = Number(properties.getProperty(APP.PROPERTIES.AUTOMATIC_SUCCESS_COUNT) || 0);
+  setSettingsValues_({
+    'GitHub 自動更新': configured ? '已啟用（每小時）' : '尚未設定',
+    'GitHub 金鑰到期日': properties.getProperty(APP.PROPERTIES.TOKEN_EXPIRES_ON) || '',
+    'GitHub 最後要求(UTC)': properties.getProperty(APP.PROPERTIES.LAST_DISPATCH_AT) || '',
+    'GitHub 最後要求狀態': properties.getProperty(APP.PROPERTIES.LAST_DISPATCH_STATUS) || '尚未執行',
+    'Apps Script 成功啟動次數': successCount,
+    'GitHub 原生排程': successCount >= 2 ? '可移除（Apps Script 已成功 2 次）' : '保留中',
+  });
+}
+
+function appendSystemLog_(level, message, detail) {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SYSTEM);
+  if (!sheet) return;
+  sheet.appendRow([new Date(), level, message, detail || '']);
+}
+
+function installAutomationTriggers_() {
+  const spreadsheet = getSpreadsheet_();
+  const handlers = new Set(ScriptApp.getProjectTriggers().map(trigger => trigger.getHandlerFunction()));
+  if (!handlers.has('processPendingEmails')) {
+    ScriptApp.newTrigger('processPendingEmails').timeBased().everyMinutes(1).create();
+  }
+  if (!handlers.has('processHourlyGitHubDispatch')) {
+    ScriptApp.newTrigger('processHourlyGitHubDispatch').timeBased().everyMinutes(5).create();
+    PropertiesService.getUserProperties().setProperty(
+      APP.PROPERTIES.LAST_AUTO_HOUR,
+      Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd-HH')
+    );
+  }
+  if (!handlers.has('handleDashboardAction')) {
+    ScriptApp.newTrigger('handleDashboardAction').forSpreadsheet(spreadsheet).onEdit().create();
+  }
 }
 
 function formatSheetDate_(value) {

@@ -1,5 +1,4 @@
 SCAN_SHEET = "掃描設定"
-LEGACY_MONITOR_SHEET = "監控清單_舊版"
 SETTINGS_SHEET = "設定"
 ALERT_LOG_SHEET = "警示紀錄"
 SYSTEM_LOG_SHEET = "系統紀錄"
@@ -88,10 +87,16 @@ SETTINGS_DEFAULTS = {
     "市場時區": "America/New_York",
     "Cloud Run URL": "",
     "Web App URL": "",
-    "系統版本": "0.3.2",
+    "系統版本": "0.4.0",
     "下次允許抓取(UTC)": "",
     "連續失敗次數": 0,
     "最後成功抓取(UTC)": "",
     "最後執行(UTC)": "",
     "最後狀態": "尚未執行",
+    "GitHub 自動更新": "尚未設定",
+    "GitHub 金鑰到期日": "",
+    "GitHub 最後要求(UTC)": "",
+    "GitHub 最後要求狀態": "尚未執行",
+    "Apps Script 成功啟動次數": 0,
+    "GitHub 原生排程": "保留中",
 }

@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.3.2`
+目前版本：`0.4.0`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算 Greeks 與賣出權利金年化報酬率，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 
@@ -19,17 +19,19 @@
 - 同一輪的多個新符合合約合併成一封 Email，信中列出 CALL／PUT、履約價、Bid、Delta、Vega、年化報酬率、未平倉量與 DTE。
 - 連續兩次有效不符合後才重新啟用該合約的通知，降低邊界值反覆寄信。
 - 條件變更會自動重新建立基準，避免新條件一儲存就大量寄信。
-- GitHub Actions 每 5 分鐘喚醒一次；服務依美股交易日曆判斷，開盤每 5 分鐘更新、盤外每 10 分鐘更新。
+- Apps Script 在每小時整點後的第一個檢查點啟動 GitHub Actions，通常落在整點後約 0～5 分鐘。
+- 可從「選擇權警示 → 立即手動更新」，或勾選控制台 `H7`，隨時要求更新。
+- GitHub 金鑰保存在 Apps Script 個人屬性，不寫入試算表；預設採 90 天有效期，並於到期前 7 天寄信提醒。
+- 更新要求第一次失敗會立即寄信；持續失敗期間每 24 小時最多提醒一次，恢復時再通知一次。
 - 遇到 Yahoo 流量限制時採 15／30／60 分鐘退避，不繞過限制。
 
-## 升級既有 0.2.1 系統
+## 升級至 0.4.0
 
-請依照 [UPGRADE_0.3.md](UPGRADE_0.3.md) 操作。執行 Apps Script 的 `setupSystem` 時：
+請依照 [UPGRADE_0.4.md](UPGRADE_0.4.md) 操作。執行 Apps Script 的 `setupSystem` 時：
 
-- 原「監控清單」會改名為「監控清單_舊版」並保留。
-- 原「警示紀錄」會改名為「警示紀錄_舊版」並保留。
-- 新系統會建立「掃描設定」與新版「警示紀錄」。
-- 舊權利金上下限不會自動轉成新條件，避免錯誤通知。
+- 不會尋找、重新命名、刪除或修改任何舊版分頁。
+- 舊版相容函式與自動遷移程式已從程式碼移除。
+- 舊分頁如需刪除，由試算表擁有者自行確認後處理。
 
 ## 專案結構
 
@@ -40,7 +42,7 @@ infra/deploy.ps1     選用的 Google Cloud 部署腳本
 scripts/             Google Sheets 範本產生器
 tests/               定價、Greeks、條件、基準與更新流程測試
 GITHUB_ACTIONS.md     GitHub Actions 免費部署與授權步驟
-UPGRADE_0.3.md        既有系統升級操作說明
+UPGRADE_0.4.md        0.4.0 升級與金鑰設定說明
 DEPLOYMENT.md         選用的 Cloud Run 部署步驟
 ```
 

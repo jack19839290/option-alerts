@@ -3,8 +3,8 @@ name: Option alerts refresh
 on:
   workflow_dispatch:
   schedule:
-    # 明確列出每 5 分鐘的執行時間，並避開整點以降低排程壅塞機率。
-    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+    # 0.4.0 過渡期安全網：Apps Script 成功啟動兩次後移除此 schedule 區塊。
+    - cron: '2 * * * *'
 
 permissions:
   contents: read
