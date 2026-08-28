@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.5.0',
+  VERSION: '0.5.1',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -167,7 +167,7 @@ function setupSystem() {
   installAutomationTriggers_();
   applyScanFormatting_();
   refreshGitHubStatusSettings_();
-  spreadsheet.toast('系統已初始化／升級至 0.5.0；Vega 篩選已改為 Bid-Ask Spread', '選擇權警示', 7);
+  spreadsheet.toast('系統已初始化／升級至 0.5.1；^IRX 利率讀取已修正', '選擇權警示', 7);
 }
 
 function prepareNextRefresh_() {

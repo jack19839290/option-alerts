@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.5.0`
+目前版本：`0.5.1`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算 Greeks 與賣出權利金年化報酬率，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 
@@ -16,6 +16,7 @@
 - CALL 年化報酬率為 `Bid ÷ 持股成本 ÷ DTE × 365`；未填持股成本時留白。
 - Delta、Gamma、Theta（每日）與 Vega（每 1% IV）由 Black-Scholes-Merton 模型估算，期權鍊依此順序顯示，最後再列出 `|Delta|`。
 - Yahoo 的 `trailingAnnualDividendYield` 與 `dividendYield` 採各自單位正規化；不合理的股息率不會直接帶入 Greeks。
+- 無風險利率優先讀取 Yahoo `^IRX` 的即時 `lastPrice`，其次採最近交易日 `Close`；兩者都失敗才使用設定中的備援值並在資料狀態標示。
 - 第一次成功掃描只建立基準、不寄信；之後僅在合約新符合全部條件時通知。
 - 同一輪的多個新符合合約合併成一封 Email，信中列出 CALL／PUT、履約價、Bid、Spread、Greeks、年化報酬率、未平倉量與 DTE。
 - 連續兩次有效不符合後才重新啟用該合約的通知，降低邊界值反覆寄信。
@@ -26,7 +27,7 @@
 - 更新要求第一次失敗會立即寄信；持續失敗期間每 24 小時最多提醒一次，恢復時再通知一次。
 - 遇到 Yahoo 流量限制時採 15／30／60 分鐘退避，不繞過限制。
 
-## 升級至 0.5.0
+## 升級至 0.5.1
 
 請依照 [UPGRADE_0.5.md](UPGRADE_0.5.md) 操作。執行 Apps Script 的 `setupSystem` 時：
 
@@ -43,7 +44,7 @@ infra/deploy.ps1     選用的 Google Cloud 部署腳本
 scripts/             Google Sheets 範本產生器
 tests/               定價、Greeks、條件、基準與更新流程測試
 GITHUB_ACTIONS.md     GitHub Actions 免費部署與授權步驟
-UPGRADE_0.5.md        0.5.0 升級與驗證說明
+UPGRADE_0.5.md        0.5.1 升級與驗證說明
 DEPLOYMENT.md         選用的 Cloud Run 部署步驟
 ```
 

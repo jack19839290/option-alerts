@@ -9,10 +9,10 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_5_0_everywhere(self):
-        self.assertIn("VERSION: '0.5.0'", CODE)
-        self.assertIn('version = "0.5.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.5.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+    def test_version_is_0_5_1_everywhere(self):
+        self.assertIn("VERSION: '0.5.1'", CODE)
+        self.assertIn('version = "0.5.1"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.5.1"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
 
     def test_legacy_migration_and_compatibility_code_are_removed(self):
         for forbidden in (

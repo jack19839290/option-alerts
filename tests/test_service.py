@@ -92,6 +92,13 @@ class DividendWarningProvider(FakeProvider):
         return snapshot
 
 
+class FallbackRateProvider(FakeProvider):
+    def fetch_risk_free_rate(self, symbol, fallback):
+        self.risk_free_rate_source = "設定備援值"
+        self.risk_free_rate_note = f"{symbol} 即時值與最近收盤均無法取得，採用備援利率"
+        return fallback
+
+
 def make_scan(*, baseline=False, fingerprint=""):
     row = [
         True,
@@ -203,6 +210,19 @@ class ServiceTests(unittest.TestCase):
         rows = repository.chain_updates[scan.scan_id]
         self.assertTrue(rows)
         self.assertIn("股息率資料異常", rows[0]["資料狀態"])
+
+    def test_risk_free_fallback_is_visible_in_data_status(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc)
+
+        result = RefreshService(repository, FallbackRateProvider()).refresh(
+            force=True, now=now
+        )
+
+        rows = repository.chain_updates[scan.scan_id]
+        self.assertIn("採用備援利率", rows[0]["資料狀態"])
+        self.assertEqual(result["risk_free_rate_source"], "設定備援值")
 
     def test_later_new_match_creates_aggregated_pending_payload(self):
         scan = make_scan(baseline=True)

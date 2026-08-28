@@ -143,6 +143,13 @@ class RefreshService:
             )
         except RateLimitError as exc:
             return self._rate_limited(settings, now, str(exc))
+        risk_free_rate_source = str(
+            getattr(provider, "risk_free_rate_source", risk_free_symbol)
+            or risk_free_symbol
+        )
+        risk_free_rate_note = str(
+            getattr(provider, "risk_free_rate_note", "") or ""
+        )
 
         groups: dict[tuple[str, object], list[ScanRecord]] = defaultdict(list)
         for scan in active:
@@ -251,6 +258,8 @@ class RefreshService:
                         overall_result = "符合" if evaluation.matched else "未符合"
 
                     data_issues: list[str] = []
+                    if risk_free_rate_note:
+                        data_issues.append(risk_free_rate_note)
                     if snapshot.dividend_yield_note:
                         data_issues.append(snapshot.dividend_yield_note)
                     if snapshot.underlying_price is None:
@@ -384,6 +393,8 @@ class RefreshService:
                     "invalid_rows": invalid_rows,
                     "market_open": is_open,
                     "close_update": session.just_closed,
+                    "risk_free_rate": risk_free_rate,
+                    "risk_free_rate_source": risk_free_rate_source,
                 },
                 ensure_ascii=False,
             ),
@@ -396,6 +407,8 @@ class RefreshService:
             "invalid_rows": invalid_rows,
             "market_open": is_open,
             "close_update": session.just_closed,
+            "risk_free_rate": risk_free_rate,
+            "risk_free_rate_source": risk_free_rate_source,
         }
 
     def _error_update(

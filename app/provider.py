@@ -8,6 +8,7 @@ from .models import ChainSnapshot, OptionQuote
 
 
 MAX_REASONABLE_DIVIDEND_YIELD = 0.20
+YAHOO_PERCENT_POINT_RATE_SYMBOLS = {"^IRX", "^FVX", "^TNX", "^TYX"}
 
 
 class MarketDataError(RuntimeError):
@@ -29,6 +30,16 @@ def _safe_float(value: Any) -> float | None:
 def _safe_int(value: Any) -> int | None:
     number = _safe_float(value)
     return int(number) if number is not None else None
+
+
+def _normalize_yahoo_rate(value: Any, symbol: str) -> float | None:
+    """Convert Yahoo yield-index quotes into a decimal annual rate."""
+    number = _safe_float(value)
+    if number is None:
+        return None
+    if symbol.strip().upper() in YAHOO_PERCENT_POINT_RATE_SYMBOLS:
+        return number / 100.0
+    return number / 100.0 if abs(number) > 1.0 else number
 
 
 def _select_dividend_yield(
@@ -64,6 +75,8 @@ class YahooFinanceProvider:
 
     def __init__(self, default_dividend_yield: float = 0.0):
         self.default_dividend_yield = default_dividend_yield
+        self.risk_free_rate_source = "尚未取得"
+        self.risk_free_rate_note = ""
 
     @staticmethod
     def _yf():
@@ -72,16 +85,43 @@ class YahooFinanceProvider:
         return yf
 
     def fetch_risk_free_rate(self, symbol: str, fallback: float) -> float:
+        self.risk_free_rate_source = "設定備援值"
+        self.risk_free_rate_note = ""
         try:
             ticker = self._yf().Ticker(symbol)
-            value = _safe_float(ticker.fast_info.get("last_price"))
-            if value is None:
-                return fallback
-            return value / 100.0 if value > 1.0 else value
         except Exception as exc:  # yfinance exposes several transport exceptions
             if self._is_rate_limit(exc):
                 raise RateLimitError(str(exc)) from exc
+            self.risk_free_rate_note = f"{symbol} 無法建立行情連線，採用備援利率"
             return fallback
+
+        try:
+            fast_info = ticker.fast_info
+            for key in ("lastPrice", "last_price"):
+                rate = _normalize_yahoo_rate(fast_info.get(key), symbol)
+                if rate is not None:
+                    self.risk_free_rate_source = f"{symbol} fast_info.{key}"
+                    return rate
+        except Exception as exc:
+            if self._is_rate_limit(exc):
+                raise RateLimitError(str(exc)) from exc
+
+        try:
+            history = ticker.history(period="5d", auto_adjust=False)
+            close = history.get("Close") if history is not None else None
+            if close is not None:
+                valid_close = close.dropna()
+                if not valid_close.empty:
+                    rate = _normalize_yahoo_rate(valid_close.iloc[-1], symbol)
+                    if rate is not None:
+                        self.risk_free_rate_source = f"{symbol} 最近交易日 Close"
+                        return rate
+        except Exception as exc:
+            if self._is_rate_limit(exc):
+                raise RateLimitError(str(exc)) from exc
+
+        self.risk_free_rate_note = f"{symbol} 即時值與最近收盤均無法取得，採用備援利率"
+        return fallback
 
     def fetch_chain(self, ticker_symbol: str, expiry: date) -> ChainSnapshot:
         try:
@@ -113,8 +153,11 @@ class YahooFinanceProvider:
             if value is not None and value > 0:
                 return value
         try:
-            value = _safe_float(ticker.fast_info.get("last_price"))
-            return value if value and value > 0 else None
+            for key in ("lastPrice", "last_price"):
+                value = _safe_float(ticker.fast_info.get(key))
+                if value is not None and value > 0:
+                    return value
+            return None
         except Exception:
             return None
 
