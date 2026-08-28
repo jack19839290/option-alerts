@@ -9,10 +9,10 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_4_0_everywhere(self):
-        self.assertIn("VERSION: '0.4.0'", CODE)
-        self.assertIn('version = "0.4.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.4.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+    def test_version_is_0_5_0_everywhere(self):
+        self.assertIn("VERSION: '0.5.0'", CODE)
+        self.assertIn('version = "0.5.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.5.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
 
     def test_legacy_migration_and_compatibility_code_are_removed(self):
         for forbidden in (
@@ -35,14 +35,17 @@ class AppsScriptAutomationTests(unittest.TestCase):
             manifest["oauthScopes"],
         )
 
-    def test_hourly_guard_uses_five_minute_checker(self):
+    def test_market_event_guard_uses_five_minute_checker(self):
         self.assertIn("function processHourlyGitHubDispatch()", CODE)
         self.assertIn("everyMinutes(5)", CODE)
-        self.assertIn("GITHUB_LAST_AUTO_ATTEMPT_HOUR", CODE)
-        self.assertRegex(CODE, r"LAST_AUTO_HOUR\).*=== hourKey")
+        self.assertIn("GITHUB_LAST_AUTO_MARKET_EVENT", CODE)
+        self.assertRegex(CODE, r"LAST_AUTO_EVENT\).*=== eventKey")
+        self.assertIn("hour === 9 && minute >= 30", CODE)
+        self.assertIn("hour >= 10 && hour <= 15", CODE)
+        self.assertIn("hour === 16 && minute < 30", CODE)
         workflow = (ROOT / ".github" / "workflows" / "option-alerts.yml").read_text(encoding="utf-8")
-        self.assertIn("cron: '2 * * * *'", workflow)
-        self.assertNotIn("2,7,12,17", workflow)
+        self.assertNotIn("schedule:", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
 
     def test_manual_controls_dispatch_real_workflow(self):
         self.assertIn(".addItem('立即手動更新', 'runManualRefresh')", CODE)
@@ -59,7 +62,25 @@ class AppsScriptAutomationTests(unittest.TestCase):
     def test_dispatch_accepts_github_success_codes(self):
         self.assertIn("code !== 200 && code !== 204", CODE)
         self.assertIn("/dispatches", CODE)
-        self.assertIn("JSON.stringify({ref: APP.GITHUB.REF})", CODE)
+        self.assertIn("inputs: {force: mode === 'manual' ? 'true' : 'false'}", CODE)
+        workflow = (ROOT / ".github" / "workflows" / "option-alerts.yml").read_text(encoding="utf-8")
+        self.assertIn("FORCE_REFRESH:", workflow)
+
+    def test_spread_replaces_vega_filter_but_vega_stays_in_chain(self):
+        form = (ROOT / "apps-script" / "Index.html").read_text(encoding="utf-8")
+        self.assertIn("Bid–Ask Spread條件", form)
+        self.assertIn("Delta條件", form)
+        self.assertNotIn("|Delta| 絕對值條件", form)
+        self.assertNotIn('name="vegaOperator"', form)
+        self.assertIn("'Vega估算(每1%)'", CODE)
+        self.assertIn("'Gamma估算'", CODE)
+
+    def test_upgrade_clears_old_vega_filter_without_deleting_sheets(self):
+        self.assertIn("function migrateScanSchema050_", CODE)
+        self.assertIn("headers.indexOf('Vega條件')", CODE)
+        self.assertIn("row[vegaOperatorIndex] = ''", CODE)
+        self.assertIn("row[baselineIndex] = false", CODE)
+        self.assertNotIn("deleteSheet(", CODE)
 
     def test_token_is_kept_in_user_properties(self):
         self.assertIn("PropertiesService.getUserProperties()", CODE)

@@ -31,6 +31,7 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(scan.scan_id, "MU|2027-01-15")
         self.assertEqual(scan.sheet_name, "MU_2027-01-15")
         self.assertEqual(scan.delta_threshold, 0.2)
+        self.assertEqual(scan.spread_threshold, 0.5)
         self.assertTrue(scan.has_active_conditions)
         self.assertEqual(len(scan.condition_fingerprint), 16)
 

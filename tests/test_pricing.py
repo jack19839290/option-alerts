@@ -2,6 +2,7 @@ import unittest
 
 from app.pricing import (
     annualized_premium_return,
+    bid_ask_spread_rate,
     calculate_mid,
     select_alert_price,
     select_seller_price,
@@ -19,6 +20,11 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(select_seller_price(2.0), (2.0, "Bid"))
         self.assertEqual(select_seller_price(0), (None, "Bid無效"))
         self.assertIsNone(calculate_mid(2.4, 2.0))
+
+    def test_bid_ask_spread_rate_uses_mid(self):
+        self.assertAlmostEqual(bid_ask_spread_rate(3.8, 4.2), 0.10)
+        self.assertIsNone(bid_ask_spread_rate(0, 4.2))
+        self.assertIsNone(bid_ask_spread_rate(4.2, 3.8))
 
     def test_annualized_return_formula(self):
         result = annualized_premium_return(

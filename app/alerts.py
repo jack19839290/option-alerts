@@ -30,7 +30,7 @@ def evaluate_conditions(
     *,
     scan: ScanRecord,
     delta: float | None,
-    vega: float | None,
+    spread_rate: float | None,
     annual_return: float | None,
     open_interest: int | None,
 ) -> ConditionEvaluation:
@@ -39,7 +39,9 @@ def evaluate_conditions(
         scan.delta_operator,
         scan.delta_threshold,
     )
-    vega_result = _condition_result(vega, scan.vega_operator, scan.vega_threshold)
+    spread_result = _condition_result(
+        spread_rate, scan.spread_operator, scan.spread_threshold
+    )
     annual_result = _condition_result(
         annual_return,
         scan.annual_return_operator,
@@ -53,7 +55,7 @@ def evaluate_conditions(
         passed = open_interest > scan.open_interest_min
         open_interest_result = ("通過" if passed else "未通過", passed, True)
 
-    results = (delta_result, vega_result, annual_result, open_interest_result)
+    results = (delta_result, spread_result, annual_result, open_interest_result)
     if not scan.has_active_conditions:
         matched: bool | None = False
     elif not all(result[2] for result in results):
@@ -64,7 +66,7 @@ def evaluate_conditions(
         has_active_conditions=scan.has_active_conditions,
         matched=matched,
         delta_result=delta_result[0],
-        vega_result=vega_result[0],
+        spread_result=spread_result[0],
         annual_return_result=annual_result[0],
         open_interest_result=open_interest_result[0],
     )

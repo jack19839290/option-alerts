@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.4.0',
+  VERSION: '0.5.0',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -13,37 +13,38 @@ const APP = Object.freeze({
     WORKFLOW: 'option-alerts.yml',
     REF: 'main',
   },
+  MARKET_TIMEZONE: 'America/New_York',
   PROPERTIES: {
     TOKEN: 'GITHUB_ACTIONS_TOKEN',
     TOKEN_EXPIRES_ON: 'GITHUB_ACTIONS_TOKEN_EXPIRES_ON',
     SETUP_NONCE: 'GITHUB_SETUP_NONCE',
-    LAST_AUTO_HOUR: 'GITHUB_LAST_AUTO_ATTEMPT_HOUR',
+    LAST_AUTO_EVENT: 'GITHUB_LAST_AUTO_MARKET_EVENT',
     LAST_DISPATCH_AT: 'GITHUB_LAST_DISPATCH_AT',
     LAST_DISPATCH_STATUS: 'GITHUB_LAST_DISPATCH_STATUS',
     AUTOMATIC_SUCCESS_COUNT: 'GITHUB_AUTOMATIC_SUCCESS_COUNT',
     FAILURE_ACTIVE: 'GITHUB_FAILURE_ACTIVE',
     LAST_FAILURE_NOTICE_AT: 'GITHUB_LAST_FAILURE_NOTICE_AT',
     LAST_EXPIRY_NOTICE_DATE: 'GITHUB_LAST_EXPIRY_NOTICE_DATE',
-    CRON_REMOVAL_READY_NOTIFIED: 'GITHUB_CRON_REMOVAL_READY_NOTIFIED',
   },
   SCAN_HEADERS: [
     '啟用', '掃描ID', '股票代號', '到期日', '顯示類型', 'Delta條件', 'Delta門檻',
-    'Vega條件', 'Vega門檻', '年化報酬率條件', '年化報酬率門檻', 'CALL持股成本',
+    'Bid-Ask價差條件', 'Bid-Ask價差門檻', '年化報酬率條件', '年化報酬率門檻', 'CALL持股成本',
     '未平倉大於(口)', 'Email通知', '備註', '狀態', '標的股價', '合約數', '符合數',
     '最後抓取時間', '資料狀態', '待寄信', '最後通知時間', '錯誤訊息', '工作表',
     '已建立基準', '條件指紋'
   ],
   CHAIN_HEADERS: [
     '掃描ID', '類型', '履約價', '合約代號', '標的股價', 'Last', 'Bid', 'Ask', 'Mid',
-    '賣出試算價', '試算價來源', 'IV', '無風險利率', '股息殖利率', 'Greeks模型',
-    'Delta估算', '|Delta|', 'Vega估算(每1%)', 'Theta估算(每日)', 'DTE', '年化報酬率',
-    '年化本金', '成交量', '未平倉', 'Delta條件結果', 'Vega條件結果',
+    'Bid-Ask價差率', '賣出試算價', '試算價來源', 'IV', '無風險利率', '股息殖利率', 'Greeks模型',
+    'Delta估算', 'Gamma估算', 'Theta估算(每日)', 'Vega估算(每1%)', '|Delta|', 'DTE', '年化報酬率',
+    '年化本金', '成交量', '未平倉', 'Delta條件結果', 'Bid-Ask價差條件結果',
     '年化報酬率條件結果', '未平倉條件結果', '全部條件符合', '通知狀態',
     '可再次通知', '連續有效不符合', '待寄信', '最後成交時間', '最後抓取時間', '資料狀態'
   ],
   ALERT_HEADERS: [
     '寄送時間', '掃描ID', '股票代號', '到期日', '類型', '履約價', 'Bid', 'Delta估算',
-    'Vega估算(每1%)', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態'
+    'Vega估算(每1%)', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態',
+    'Ask', 'Bid-Ask價差率', 'Gamma估算', 'Theta估算(每日)'
   ],
 });
 
@@ -112,8 +113,8 @@ function submitScan(payload) {
       input.displayType,
       input.deltaOperator,
       input.deltaThreshold === null ? '' : input.deltaThreshold,
-      input.vegaOperator,
-      input.vegaThreshold === null ? '' : input.vegaThreshold,
+      input.spreadOperator,
+      input.spreadThreshold === null ? '' : input.spreadThreshold,
       input.annualReturnOperator,
       input.annualReturnThreshold === null ? '' : input.annualReturnThreshold,
       input.callCostBasis === null ? '' : input.callCostBasis,
@@ -144,8 +145,8 @@ function submitScan(payload) {
       scanId: input.scanId,
       sheetName: input.sheetName,
       message: isNew
-        ? '掃描已新增；第一次抓取只建立基準、不寄信。可按「立即手動更新」或等待每小時自動更新。'
-        : '掃描設定已更新；下一次抓取會重新建立基準。可按「立即手動更新」或等待每小時自動更新。',
+        ? '掃描已新增；第一次抓取只建立基準、不寄信。可按「立即手動更新」或等待下一個開盤更新時點。'
+        : '掃描設定已更新；下一次抓取會重新建立基準。可按「立即手動更新」或等待下一個開盤更新時點。',
     };
   } finally {
     lock.releaseLock();
@@ -166,7 +167,7 @@ function setupSystem() {
   installAutomationTriggers_();
   applyScanFormatting_();
   refreshGitHubStatusSettings_();
-  spreadsheet.toast('系統已初始化／升級至 0.4.0；未刪除或更動任何舊版分頁', '選擇權警示', 7);
+  spreadsheet.toast('系統已初始化／升級至 0.5.0；Vega 篩選已改為 Bid-Ask Spread', '選擇權警示', 7);
 }
 
 function prepareNextRefresh_() {
@@ -244,6 +245,10 @@ function processPendingEmails() {
         item.contract_symbol || '',
         recipient,
         '已寄送',
+        item.ask ?? '',
+        item.spread_rate ?? '',
+        item.gamma ?? '',
+        item.theta ?? '',
       ]);
       if (logRows.length) {
         alertLog.getRange(alertLog.getLastRow() + 1, 1, logRows.length, APP.ALERT_HEADERS.length).setValues(logRows);
@@ -263,7 +268,8 @@ function buildScanAlertEmail_(ticker, expiry, payload, spreadsheetUrl) {
   items.forEach(item => {
     lines.push(
       `${item.option_type}｜履約價 ${formatNumber_(item.strike, 4)}｜Bid ${formatNumber_(item.bid, 4)}｜` +
-      `Delta ${formatNumber_(item.delta, 4)}｜Vega ${formatNumber_(item.vega, 4)}｜` +
+      `Spread ${formatPercent_(item.spread_rate)}｜Delta ${formatNumber_(item.delta, 4)}｜Gamma ${formatNumber_(item.gamma, 4)}｜` +
+      `Theta ${formatNumber_(item.theta, 4)}｜Vega ${formatNumber_(item.vega, 4)}｜` +
       `年化 ${formatPercent_(item.annual_return)}｜未平倉 ${formatNumber_(item.open_interest, 0)}｜DTE ${item.dte ?? '—'}`
     );
   });
@@ -277,7 +283,10 @@ function buildScanAlertEmail_(ticker, expiry, payload, spreadsheetUrl) {
       <td>${escapeHtml_(item.option_type || '')}</td>
       <td>${escapeHtml_(formatNumber_(item.strike, 4))}</td>
       <td>${escapeHtml_(formatNumber_(item.bid, 4))}</td>
+      <td>${escapeHtml_(formatPercent_(item.spread_rate))}</td>
       <td>${escapeHtml_(formatNumber_(item.delta, 4))}</td>
+      <td>${escapeHtml_(formatNumber_(item.gamma, 4))}</td>
+      <td>${escapeHtml_(formatNumber_(item.theta, 4))}</td>
       <td>${escapeHtml_(formatNumber_(item.vega, 4))}</td>
       <td>${escapeHtml_(formatPercent_(item.annual_return))}</td>
       <td>${escapeHtml_(formatNumber_(item.open_interest, 0))}</td>
@@ -293,7 +302,10 @@ function buildScanAlertEmail_(ticker, expiry, payload, spreadsheetUrl) {
         <th style="padding:7px;border:1px solid #cbd5e1">類型</th>
         <th style="padding:7px;border:1px solid #cbd5e1">履約價</th>
         <th style="padding:7px;border:1px solid #cbd5e1">Bid</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">Spread</th>
         <th style="padding:7px;border:1px solid #cbd5e1">Delta</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">Gamma</th>
+        <th style="padding:7px;border:1px solid #cbd5e1">Theta</th>
         <th style="padding:7px;border:1px solid #cbd5e1">Vega</th>
         <th style="padding:7px;border:1px solid #cbd5e1">年化報酬率</th>
         <th style="padding:7px;border:1px solid #cbd5e1">未平倉</th>
@@ -319,7 +331,8 @@ function validateScanInput_(payload) {
 
   const delta = parseConditionPair_(payload.deltaOperator, payload.deltaThreshold, 'Delta');
   if (delta.threshold !== null && delta.threshold > 1) throw new Error('Delta門檻必須介於 0 與 1');
-  const vega = parseConditionPair_(payload.vegaOperator, payload.vegaThreshold, 'Vega');
+  const spread = parseConditionPair_(payload.spreadOperator, payload.spreadThreshold, 'Bid-Ask價差率');
+  if (spread.threshold !== null) spread.threshold /= 100;
   const annual = parseConditionPair_(payload.annualReturnOperator, payload.annualReturnThreshold, '年化報酬率');
   if (annual.threshold !== null) annual.threshold /= 100;
   const callCostBasis = parseOptionalPositiveNumber_(payload.callCostBasis, 'CALL持股成本');
@@ -334,8 +347,8 @@ function validateScanInput_(payload) {
     displayType,
     deltaOperator: delta.operator,
     deltaThreshold: delta.threshold,
-    vegaOperator: vega.operator,
-    vegaThreshold: vega.threshold,
+    spreadOperator: spread.operator,
+    spreadThreshold: spread.threshold,
     annualReturnOperator: annual.operator,
     annualReturnThreshold: annual.threshold,
     callCostBasis,
@@ -376,6 +389,8 @@ function parseOptionalPositiveNumber_(value, label) {
 
 function ensureSystemSheets_() {
   const spreadsheet = getSpreadsheet_();
+  migrateScanSchema050_(spreadsheet);
+  migrateSettingsSchema050_(spreadsheet);
   const definitions = [
     [APP.SHEETS.DASHBOARD, ['選擇權警示控制台']],
     [APP.SHEETS.SCANS, APP.SCAN_HEADERS],
@@ -386,6 +401,9 @@ function ensureSystemSheets_() {
   definitions.forEach(([name, headers]) => {
     let sheet = spreadsheet.getSheetByName(name);
     if (!sheet) sheet = spreadsheet.insertSheet(name);
+    if (sheet.getMaxColumns() < headers.length) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
+    }
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
   });
@@ -393,13 +411,57 @@ function ensureSystemSheets_() {
   seedDashboard_();
 }
 
+function migrateScanSchema050_(spreadsheet) {
+  const sheet = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
+  if (!sheet || sheet.getLastColumn() < 1) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const vegaOperatorIndex = headers.indexOf('Vega條件');
+  const vegaThresholdIndex = headers.indexOf('Vega門檻');
+  if (vegaOperatorIndex < 0 && vegaThresholdIndex < 0) return;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    const scanIdIndex = headers.indexOf('掃描ID');
+    const tickerIndex = headers.indexOf('股票代號');
+    const baselineIndex = headers.indexOf('已建立基準');
+    const fingerprintIndex = headers.indexOf('條件指紋');
+    values.forEach(row => {
+      const hasScan = String(row[scanIdIndex] || '').trim() || String(row[tickerIndex] || '').trim();
+      if (!hasScan) return;
+      if (vegaOperatorIndex >= 0) row[vegaOperatorIndex] = '';
+      if (vegaThresholdIndex >= 0) row[vegaThresholdIndex] = '';
+      if (baselineIndex >= 0) row[baselineIndex] = false;
+      if (fingerprintIndex >= 0) row[fingerprintIndex] = '';
+    });
+    sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+  }
+}
+
+function migrateSettingsSchema050_(spreadsheet) {
+  const sheet = spreadsheet.getSheetByName(APP.SHEETS.SETTINGS);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  values.forEach((row, index) => {
+    if (row[0] === '開盤更新間隔(分鐘)') {
+      sheet.getRange(index + 2, 1, 1, 3).setValues([[
+        '自動更新規則', '開盤、盤中整點、收盤', 'CBOE 美股股票期權正常交易時段'
+      ]]);
+    } else if (row[0] === '盤外更新間隔(分鐘)') {
+      sheet.getRange(index + 2, 1, 1, 3).setValues([[
+        '盤外自動更新', '停用', '盤外只允許使用者手動更新'
+      ]]);
+    }
+  });
+}
+
 function seedSettings_() {
   const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SETTINGS);
   const rows = [
     ['Spreadsheet ID', '', '初始化時自動填入；GitHub Actions 也需設定相同 ID'],
     ['通知信箱', '', '全系統固定收件信箱'],
-    ['開盤更新間隔(分鐘)', 5, 'GitHub Actions 最短排程為 5 分鐘'],
-    ['盤外更新間隔(分鐘)', 10, '盤前、盤後、休市'],
+    ['自動更新規則', '開盤、盤中整點、收盤', 'CBOE 美股股票期權正常交易時段'],
+    ['盤外自動更新', '停用', '盤外只允許使用者手動更新'],
     ['資料過期門檻(分鐘)', 10, '超過後在表內標示異常'],
     ['無風險利率代號', '^IRX', 'Yahoo 13 週國庫券指標'],
     ['備援無風險利率', 0.05, '^IRX 失敗時採用'],
@@ -418,8 +480,8 @@ function seedSettings_() {
     ['GitHub 金鑰到期日', '', '只記錄使用者輸入的到期日，用於提前 7 天提醒'],
     ['GitHub 最後要求(UTC)', '', 'Apps Script 最近一次要求 GitHub 執行的時間'],
     ['GitHub 最後要求狀態', '尚未執行', '成功、失敗或尚未設定'],
-    ['Apps Script 成功啟動次數', 0, '自動更新成功累計；達 2 次後可移除 GitHub 原生 cron'],
-    ['GitHub 原生排程', '保留中', 'Apps Script 自動更新成功 2 次前保留作為安全網'],
+    ['Apps Script 成功啟動次數', 0, 'Apps Script 自動啟動 GitHub Actions 的累計次數'],
+    ['GitHub 原生排程', '已移除（0.5.0）', '只由 Apps Script 在開盤更新時點啟動'],
   ];
   const existing = sheet.getLastRow() >= 2
     ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues()
@@ -476,7 +538,7 @@ function seedDashboard_() {
     ['1. 從選單「選擇權警示」執行「初始化／升級系統」。'],
     ['2. 在「設定」確認固定通知信箱，再從選單設定 90 天 GitHub 金鑰。'],
     ['3. 用表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。'],
-    ['4. 每小時整點後約 0～5 分鐘自動更新；也可勾選 H7 立即手動更新。'],
+    ['4. 開盤、盤中整點與收盤自動更新；盤外可勾選 H7 手動更新。'],
     ['5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。'],
     ['6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。'],
   ]);
@@ -490,6 +552,16 @@ function ensureChainSheet_(sheetName) {
   const spreadsheet = getSpreadsheet_();
   let sheet = spreadsheet.getSheetByName(sheetName);
   if (!sheet) sheet = spreadsheet.insertSheet(sheetName);
+  if (sheet.getMaxColumns() < APP.CHAIN_HEADERS.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), APP.CHAIN_HEADERS.length - sheet.getMaxColumns());
+  }
+  const existingHeaders = sheet.getLastColumn() > 0
+    ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String)
+    : [];
+  const schemaChanged = existingHeaders.join('\u001f') !== APP.CHAIN_HEADERS.join('\u001f');
+  if (schemaChanged && sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.max(sheet.getLastColumn(), APP.CHAIN_HEADERS.length)).clearContent();
+  }
   sheet.getRange(1, 1, 1, APP.CHAIN_HEADERS.length).setValues([APP.CHAIN_HEADERS]);
   sheet.setFrozenRows(1);
   sheet.setFrozenColumns(4);
@@ -498,14 +570,17 @@ function ensureChainSheet_(sheetName) {
     .setFontWeight('bold')
     .setFontColor('#111827')
     .setWrap(true);
-  sheet.getRange('C:J').setNumberFormat('0.0000');
-  sheet.getRange('L:N').setNumberFormat('0.00%');
-  sheet.getRange('P:S').setNumberFormat('0.0000');
-  sheet.getRange('T:T').setNumberFormat('0');
-  sheet.getRange('U:U').setNumberFormat('0.00%');
-  sheet.getRange('V:V').setNumberFormat('0.0000');
-  sheet.getRange('W:X').setNumberFormat('#,##0');
-  sheet.getRange('AH:AI').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('C:C').setNumberFormat('0.0000');
+  sheet.getRange('E:I').setNumberFormat('0.0000');
+  sheet.getRange('J:J').setNumberFormat('0.00%');
+  sheet.getRange('K:K').setNumberFormat('0.0000');
+  sheet.getRange('M:O').setNumberFormat('0.00%');
+  sheet.getRange('Q:U').setNumberFormat('0.0000');
+  sheet.getRange('V:V').setNumberFormat('0');
+  sheet.getRange('W:W').setNumberFormat('0.00%');
+  sheet.getRange('X:X').setNumberFormat('0.0000');
+  sheet.getRange('Y:Z').setNumberFormat('#,##0');
+  sheet.getRange('AJ:AK').setNumberFormat('yyyy-mm-dd hh:mm:ss');
   applyChainConditionalFormatting_(sheet);
 }
 
@@ -534,7 +609,7 @@ function applyScanFormatting_() {
   ));
   sheet.getRange('D:D').setNumberFormat('yyyy-mm-dd');
   sheet.getRange('G:G').setNumberFormat('0.0000');
-  sheet.getRange('I:I').setNumberFormat('0.0000');
+  sheet.getRange('I:I').setNumberFormat('0.00%');
   sheet.getRange('K:K').setNumberFormat('0.00%');
   sheet.getRange('L:L').setNumberFormat('0.0000');
   sheet.getRange('M:M').setNumberFormat('#,##0');
@@ -583,10 +658,10 @@ function clearPlaceholderCheckboxValues_(sheet) {
 }
 
 function applyChainConditionalFormatting_(sheet) {
-  const range = sheet.getRange('A2:AJ1000');
+  const range = sheet.getRange('A2:AL1000');
   const rules = [
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$AC2="符合"').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AC2="資料不足",REGEXMATCH($AJ2,"不足|無效"))').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$AE2="符合"').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AE2="資料不足",REGEXMATCH($AL2,"不足|無效"))').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
 }
@@ -642,20 +717,19 @@ function saveGitHubAutomationConfig(payload) {
   properties.setProperties({
     [APP.PROPERTIES.TOKEN]: token,
     [APP.PROPERTIES.TOKEN_EXPIRES_ON]: expiresOn,
-    [APP.PROPERTIES.LAST_AUTO_HOUR]: Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd-HH'),
     [APP.PROPERTIES.AUTOMATIC_SUCCESS_COUNT]: '0',
   }, false);
+  properties.deleteProperty(APP.PROPERTIES.LAST_AUTO_EVENT);
   properties.deleteProperty(APP.PROPERTIES.SETUP_NONCE);
   properties.deleteProperty(APP.PROPERTIES.FAILURE_ACTIVE);
   properties.deleteProperty(APP.PROPERTIES.LAST_FAILURE_NOTICE_AT);
   properties.deleteProperty(APP.PROPERTIES.LAST_EXPIRY_NOTICE_DATE);
-  properties.deleteProperty(APP.PROPERTIES.CRON_REMOVAL_READY_NOTIFIED);
   installAutomationTriggers_();
   refreshGitHubStatusSettings_();
   appendSystemLog_('INFO', 'GitHub 自動更新已設定', `金鑰到期日 ${expiresOn}；金鑰內容未寫入工作表`);
   return {
     ok: true,
-    message: '設定完成。系統會從下一個整點開始每小時更新；也可立即使用手動更新。',
+    message: '設定完成。系統會在美股期權開盤、盤中整點與收盤啟動更新；盤外仍可手動更新。',
   };
 }
 
@@ -694,7 +768,6 @@ function runManualRefresh_(showToast) {
     return {ok: false, message: '另一個更新要求正在處理'};
   }
   try {
-    prepareNextRefresh_();
     const result = dispatchGitHubWorkflow_('manual');
     if (showToast) getSpreadsheet_().toast('GitHub 已接受要求；通常數分鐘後寫回資料', '手動更新已送出', 7);
     return result;
@@ -729,15 +802,29 @@ function processHourlyGitHubDispatch() {
       });
       return;
     }
-    const hourKey = Utilities.formatDate(now, 'Asia/Taipei', 'yyyy-MM-dd-HH');
-    if (properties.getProperty(APP.PROPERTIES.LAST_AUTO_HOUR) === hourKey) return;
-    properties.setProperty(APP.PROPERTIES.LAST_AUTO_HOUR, hourKey);
+    const eventKey = scheduledMarketEventKey_(now);
+    if (!eventKey) return;
+    if (properties.getProperty(APP.PROPERTIES.LAST_AUTO_EVENT) === eventKey) return;
     dispatchGitHubWorkflow_('automatic');
+    properties.setProperty(APP.PROPERTIES.LAST_AUTO_EVENT, eventKey);
   } catch (error) {
-    console.error(`GitHub 每小時更新失敗：${error.message || error}`);
+    console.error(`GitHub 開盤時段更新失敗：${error.message || error}`);
   } finally {
     lock.releaseLock();
   }
+}
+
+function scheduledMarketEventKey_(now) {
+  const weekday = Utilities.formatDate(now, APP.MARKET_TIMEZONE, 'EEE');
+  if (weekday === 'Sat' || weekday === 'Sun') return '';
+  const dateKey = Utilities.formatDate(now, APP.MARKET_TIMEZONE, 'yyyy-MM-dd');
+  const hour = Number(Utilities.formatDate(now, APP.MARKET_TIMEZONE, 'H'));
+  const minute = Number(Utilities.formatDate(now, APP.MARKET_TIMEZONE, 'm'));
+
+  if (hour === 9 && minute >= 30) return `${dateKey}:open`;
+  if (hour >= 10 && hour <= 15) return `${dateKey}:hour:${String(hour).padStart(2, '0')}`;
+  if (hour === 16 && minute < 30) return `${dateKey}:close`;
+  return '';
 }
 
 function dispatchGitHubWorkflow_(mode) {
@@ -751,7 +838,10 @@ function dispatchGitHubWorkflow_(mode) {
       method: 'post',
       contentType: 'application/json',
       headers: gitHubHeaders_(token),
-      payload: JSON.stringify({ref: APP.GITHUB.REF}),
+      payload: JSON.stringify({
+        ref: APP.GITHUB.REF,
+        inputs: {force: mode === 'manual' ? 'true' : 'false'},
+      }),
       muteHttpExceptions: true,
     });
   } catch (error) {
@@ -805,26 +895,17 @@ function recordGitHubDispatchSuccess_(now, mode) {
     successCount += 1;
     properties.setProperty(APP.PROPERTIES.AUTOMATIC_SUCCESS_COUNT, String(successCount));
   }
-  const cronStatus = successCount >= 2 ? '可移除（Apps Script 已成功 2 次）' : '保留中';
   setSettingsValues_({
-    'GitHub 自動更新': '已啟用（每小時）',
+    'GitHub 自動更新': '已啟用（開盤／盤中整點／收盤）',
     'GitHub 最後要求(UTC)': timestamp,
     'GitHub 最後要求狀態': mode === 'automatic' ? '自動要求成功' : '手動要求成功',
     'Apps Script 成功啟動次數': successCount,
-    'GitHub 原生排程': cronStatus,
+    'GitHub 原生排程': '已移除（0.5.0）',
   });
 
   if (wasFailing) {
     appendSystemLog_('INFO', 'GitHub 更新要求已恢復', `${mode}；${timestamp}`);
     sendSystemEmail_('【選擇權警示】自動更新已恢復', `GitHub 更新要求已在 ${timestamp} 恢復成功。`);
-  }
-  if (successCount >= 2 && properties.getProperty(APP.PROPERTIES.CRON_REMOVAL_READY_NOTIFIED) !== 'true') {
-    properties.setProperty(APP.PROPERTIES.CRON_REMOVAL_READY_NOTIFIED, 'true');
-    appendSystemLog_('INFO', 'Apps Script 自動更新驗證完成', '已成功啟動 2 次，可移除 GitHub 原生 cron');
-    sendSystemEmail_(
-      '【選擇權警示】Apps Script 自動更新已驗證完成',
-      'Apps Script 已成功啟動 GitHub Actions 兩次。GitHub 原生 cron 現在可以安全移除。'
-    );
   }
 }
 
@@ -897,12 +978,12 @@ function refreshGitHubStatusSettings_() {
   const configured = Boolean(properties.getProperty(APP.PROPERTIES.TOKEN));
   const successCount = Number(properties.getProperty(APP.PROPERTIES.AUTOMATIC_SUCCESS_COUNT) || 0);
   setSettingsValues_({
-    'GitHub 自動更新': configured ? '已啟用（每小時）' : '尚未設定',
+    'GitHub 自動更新': configured ? '已啟用（開盤／盤中整點／收盤）' : '尚未設定',
     'GitHub 金鑰到期日': properties.getProperty(APP.PROPERTIES.TOKEN_EXPIRES_ON) || '',
     'GitHub 最後要求(UTC)': properties.getProperty(APP.PROPERTIES.LAST_DISPATCH_AT) || '',
     'GitHub 最後要求狀態': properties.getProperty(APP.PROPERTIES.LAST_DISPATCH_STATUS) || '尚未執行',
     'Apps Script 成功啟動次數': successCount,
-    'GitHub 原生排程': successCount >= 2 ? '可移除（Apps Script 已成功 2 次）' : '保留中',
+    'GitHub 原生排程': '已移除（0.5.0）',
   });
 }
 
@@ -920,10 +1001,6 @@ function installAutomationTriggers_() {
   }
   if (!handlers.has('processHourlyGitHubDispatch')) {
     ScriptApp.newTrigger('processHourlyGitHubDispatch').timeBased().everyMinutes(5).create();
-    PropertiesService.getUserProperties().setProperty(
-      APP.PROPERTIES.LAST_AUTO_HOUR,
-      Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd-HH')
-    );
   }
   if (!handlers.has('handleDashboardAction')) {
     ScriptApp.newTrigger('handleDashboardAction').forSpreadsheet(spreadsheet).onEdit().create();

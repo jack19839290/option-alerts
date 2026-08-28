@@ -18,7 +18,7 @@ const systemLog = workbook.worksheets.add("系統紀錄");
 
 const scanHeaders = [
   "啟用", "掃描ID", "股票代號", "到期日", "顯示類型", "Delta條件", "Delta門檻",
-  "Vega條件", "Vega門檻", "年化報酬率條件", "年化報酬率門檻", "CALL持股成本",
+  "Bid-Ask價差條件", "Bid-Ask價差門檻", "年化報酬率條件", "年化報酬率門檻", "CALL持股成本",
   "未平倉大於(口)", "Email通知", "備註", "狀態", "標的股價", "合約數", "符合數",
   "最後抓取時間", "資料狀態", "待寄信", "最後通知時間", "錯誤訊息", "工作表",
   "已建立基準", "條件指紋",
@@ -27,6 +27,7 @@ const scanHeaders = [
 const alertHeaders = [
   "寄送時間", "掃描ID", "股票代號", "到期日", "類型", "履約價", "Bid", "Delta估算",
   "Vega估算(每1%)", "年化報酬率", "未平倉", "DTE", "合約代號", "收件信箱", "寄送狀態",
+  "Ask", "Bid-Ask價差率", "Gamma估算", "Theta估算(每日)",
 ];
 
 // 控制台
@@ -100,7 +101,7 @@ dashboard.getRange("A13:A18").values = [
   ["1. 在 Google Sheets 選單「選擇權警示」執行「初始化／升級系統」。"],
   ["2. 在「設定」填入固定通知信箱，再從選單設定 90 天 GitHub 金鑰。"],
   ["3. 透過表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。"],
-  ["4. 每小時整點後約 0～5 分鐘自動更新；也可勾選 H7 立即手動更新。"],
+  ["4. 開盤、盤中整點與收盤自動更新；盤外也可勾選 H7 立即手動更新。"],
   ["5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。"],
   ["6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。"],
 ];
@@ -122,7 +123,7 @@ dashboard.getRange("A25:A29").values = [
   ["程式庫：https://github.com/ranaroussi/yfinance"],
   ["賣出試算價只採有效 Bid；Bid 無效時不計算年化報酬率。"],
   ["年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365。"],
-  ["Delta、Vega、Theta 為模型估算；Yahoo 未平倉量可能不是即時更新。"],
+  ["Delta、Gamma、Theta、Vega 為模型估算；Yahoo 未平倉量可能不是即時更新。"],
 ];
 dashboard.getRange("A25:H29").format = { font: { color: "#475569", size: 9 }, wrapText: true };
 dashboard.freezePanes.freezeRows(2);
@@ -142,7 +143,7 @@ Object.assign(sampleRow, {
   5: "≥",
   6: 0.2,
   7: "≤",
-  8: 0.5,
+  8: 0.10,
   9: "≥",
   10: 0.15,
   11: 60,
@@ -165,7 +166,7 @@ scans.getRange("A1:AA1").format = {
 scans.getRange("A2:O1000").format.font = { color: "#0000FF" };
 scans.getRange("D2:D1000").format.numberFormat = "yyyy-mm-dd";
 scans.getRange("G2:G1000").format.numberFormat = "0.0000";
-scans.getRange("I2:I1000").format.numberFormat = "0.0000";
+scans.getRange("I2:I1000").format.numberFormat = "0.00%";
 scans.getRange("K2:K1000").format.numberFormat = "0.00%";
 scans.getRange("L2:L1000").format.numberFormat = "0.0000";
 scans.getRange("M2:M1000").format.numberFormat = "#,##0";
@@ -201,8 +202,8 @@ const settingsRows = [
   ["設定項目", "設定值", "說明"],
   ["Spreadsheet ID", "", "初始化時自動填入；GitHub Actions 也需設定相同 ID"],
   ["通知信箱", "", "全系統固定收件信箱"],
-  ["開盤更新間隔(分鐘)", 5, "GitHub Actions 最短排程為 5 分鐘"],
-  ["盤外更新間隔(分鐘)", 10, "盤前、盤後、休市"],
+  ["自動更新規則", "開盤、盤中整點、收盤", "CBOE 美股股票期權正常交易時段"],
+  ["盤外自動更新", "停用", "盤外只允許使用者手動更新"],
   ["資料過期門檻(分鐘)", 10, "超過後在表內標示異常"],
   ["無風險利率代號", "^IRX", "Yahoo 13 週國庫券指標"],
   ["備援無風險利率", 0.05, "^IRX 失敗時採用"],
@@ -211,7 +212,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.4.0", "目前規格版本"],
+  ["系統版本", "0.5.0", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
@@ -221,8 +222,8 @@ const settingsRows = [
   ["GitHub 金鑰到期日", "", "只記錄使用者輸入的到期日，用於提前 7 天提醒"],
   ["GitHub 最後要求(UTC)", "", "Apps Script 最近一次要求 GitHub 執行的時間"],
   ["GitHub 最後要求狀態", "尚未執行", "成功、失敗或尚未設定"],
-  ["Apps Script 成功啟動次數", 0, "自動更新成功累計；達 2 次後可移除 GitHub 原生 cron"],
-  ["GitHub 原生排程", "保留中", "Apps Script 自動更新成功 2 次前保留作為安全網"],
+  ["Apps Script 成功啟動次數", 0, "Apps Script 自動啟動 GitHub Actions 的累計次數"],
+  ["GitHub 原生排程", "已移除（0.5.0）", "只由 Apps Script 在開盤更新時點啟動"],
 ];
 settings.getRange("A1:C25").values = settingsRows;
 settings.getRange("A1:C1").format = { fill: "#E5E7EB", font: { bold: true } };
@@ -236,14 +237,15 @@ settings.getRange("C:C").format.columnWidthPx = 330;
 settings.freezePanes.freezeRows(1);
 
 // 日誌
-alertLog.getRange("A1:O1").values = [alertHeaders];
-alertLog.getRange("A1:O1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
+alertLog.getRange("A1:S1").values = [alertHeaders];
+alertLog.getRange("A1:S1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
 alertLog.getRange("A:B").format.columnWidthPx = 180;
 alertLog.getRange("C:L").format.columnWidthPx = 105;
 alertLog.getRange("M:M").format.columnWidthPx = 190;
 alertLog.getRange("N:N").format.columnWidthPx = 230;
 alertLog.getRange("O:O").format.columnWidthPx = 100;
 alertLog.getRange("J:J").format.numberFormat = "0.00%";
+alertLog.getRange("Q:Q").format.numberFormat = "0.00%";
 alertLog.freezePanes.freezeRows(1);
 
 systemLog.getRange("A1:D1").values = [["時間(UTC)", "等級", "訊息", "詳細資料"]];
@@ -266,7 +268,7 @@ const previewRanges = {
   "控制台": "A1:H29",
   "掃描設定": "A1:O5",
   "設定": "A1:C19",
-  "警示紀錄": "A1:O5",
+  "警示紀錄": "A1:S5",
   "系統紀錄": "A1:D5",
 };
 for (const [sheetName, range] of Object.entries(previewRanges)) {

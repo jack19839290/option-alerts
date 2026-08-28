@@ -13,6 +13,14 @@ def calculate_mid(bid: float | None, ask: float | None) -> float | None:
     return None
 
 
+def bid_ask_spread_rate(bid: float | None, ask: float | None) -> float | None:
+    """(Ask - Bid) / Mid, returned as a decimal rate."""
+    midpoint = calculate_mid(bid, ask)
+    if midpoint is None:
+        return None
+    return (ask - bid) / midpoint
+
+
 def select_alert_price(
     bid: float | None, ask: float | None, last_price: float | None
 ) -> tuple[float | None, str, float | None]:

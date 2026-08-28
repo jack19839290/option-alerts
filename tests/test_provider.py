@@ -48,6 +48,7 @@ class DividendYieldTests(unittest.TestCase):
 
         self.assertIsNotNone(greeks)
         self.assertAlmostEqual(greeks.delta, -0.243319, places=6)
+        self.assertAlmostEqual(greeks.gamma, 0.004849, places=6)
         self.assertAlmostEqual(greeks.theta_per_day, -0.041119, places=6)
         self.assertAlmostEqual(greeks.vega_per_pct, 0.533093, places=6)
 

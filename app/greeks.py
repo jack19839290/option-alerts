@@ -83,10 +83,11 @@ def calculate_greeks(
         raise ValueError("option_type must be CALL or PUT")
 
     vega_per_pct = spot * discount_q * density * sqrt_t / 100.0
+    gamma = discount_q * density / (spot * volatility * sqrt_t)
     return Greeks(
         delta=delta,
+        gamma=gamma,
         vega_per_pct=vega_per_pct,
         theta_per_day=theta_annual / 365.0,
         dte=dte,
     )
-

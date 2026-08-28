@@ -2,9 +2,12 @@ name: Option alerts refresh
 
 on:
   workflow_dispatch:
-  schedule:
-    # 0.4.0 過渡期安全網：Apps Script 成功啟動兩次後移除此 schedule 區塊。
-    - cron: '2 * * * *'
+    inputs:
+      force:
+        description: Allow a manual refresh outside market hours
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -20,6 +23,7 @@ jobs:
     env:
       SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       MAX_MONITOR_ROWS: '1000'
+      FORCE_REFRESH: ${{ github.event.inputs.force || 'false' }}
 
     steps:
       - name: Checkout source

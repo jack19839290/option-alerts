@@ -28,6 +28,17 @@ class SchemaConsistencyTests(unittest.TestCase):
         apps_block = re.search(r"CHAIN_HEADERS:\s*\[(.*?)\]\s*,", code, re.S)
         self.assertIsNotNone(apps_block)
         self.assertEqual(quoted_values(apps_block.group(1)), CHAIN_HEADERS)
+        delta_index = CHAIN_HEADERS.index("Delta估算")
+        self.assertEqual(
+            CHAIN_HEADERS[delta_index : delta_index + 5],
+            [
+                "Delta估算",
+                "Gamma估算",
+                "Theta估算(每日)",
+                "Vega估算(每1%)",
+                "|Delta|",
+            ],
+        )
 
     def test_apps_script_does_not_fill_empty_scan_rows_with_false(self):
         code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")

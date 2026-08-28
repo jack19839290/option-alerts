@@ -7,9 +7,14 @@ from typing import Any
 
 from .alerts import DISABLED, evaluate_conditions, evaluate_contract_alert
 from .greeks import calculate_greeks, time_to_expiry_years
-from .market_clock import is_us_regular_session
+from .market_clock import get_us_option_session_state
 from .models import ScanRecord, as_bool
-from .pricing import annualized_premium_return, calculate_mid, select_seller_price
+from .pricing import (
+    annualized_premium_return,
+    bid_ask_spread_rate,
+    calculate_mid,
+    select_seller_price,
+)
 from .provider import MarketDataError, RateLimitError, YahooFinanceProvider
 
 
@@ -93,20 +98,25 @@ class RefreshService:
             now = now.replace(tzinfo=timezone.utc)
         settings = self.repository.load_settings()
         market_timezone = str(settings.get("市場時區") or "America/New_York")
-        is_open = is_us_regular_session(now, market_timezone)
-        interval_minutes = _as_int(
-            settings.get("開盤更新間隔(分鐘)" if is_open else "盤外更新間隔(分鐘)"),
-            5 if is_open else 10,
-        )
+        session = get_us_option_session_state(now, market_timezone)
+        is_open = session.is_open
+
+        if not force and not (session.is_open or session.just_closed):
+            return self._skip("非期權開盤或收盤更新時點", now, None)
+
+        last_success = _parse_utc(settings.get("最後成功抓取(UTC)"))
+        if (
+            not force
+            and session.just_closed
+            and session.market_close is not None
+            and last_success is not None
+            and last_success >= session.market_close
+        ):
+            return self._skip("本交易日收盤更新已完成", now, None)
 
         next_allowed = _parse_utc(settings.get("下次允許抓取(UTC)"))
         if not force and next_allowed and now < next_allowed:
             return self._skip("退避等待中", now, next_allowed)
-        last_success = _parse_utc(settings.get("最後成功抓取(UTC)"))
-        if not force and last_success and now < last_success + timedelta(minutes=interval_minutes):
-            return self._skip(
-                "尚未到更新時間", now, last_success + timedelta(minutes=interval_minutes)
-            )
 
         headers, scans, invalid_rows = self.repository.load_scans()
         active = [scan for scan in scans if scan.enabled]
@@ -182,6 +192,7 @@ class RefreshService:
                         scan.expiry, now=now, market_timezone=market_timezone
                     )
                     midpoint = calculate_mid(quote.bid, quote.ask)
+                    spread_rate = bid_ask_spread_rate(quote.bid, quote.ask)
                     seller_price, seller_source = select_seller_price(quote.bid)
                     greeks = None
                     if (
@@ -211,7 +222,7 @@ class RefreshService:
                     evaluation = evaluate_conditions(
                         scan=scan,
                         delta=greeks.delta if greeks else None,
-                        vega=greeks.vega_per_pct if greeks else None,
+                        spread_rate=spread_rate,
                         annual_return=annual_return,
                         open_interest=quote.open_interest,
                     )
@@ -246,6 +257,8 @@ class RefreshService:
                         data_issues.append("標的股價不足")
                     if seller_price is None:
                         data_issues.append("Bid無效")
+                    if spread_rate is None:
+                        data_issues.append("Bid-Ask價差資料不足")
                     if greeks is None:
                         data_issues.append("Greeks資料不足")
                     if quote.open_interest is None:
@@ -267,6 +280,7 @@ class RefreshService:
                         "Bid": quote.bid,
                         "Ask": quote.ask,
                         "Mid": midpoint,
+                        "Bid-Ask價差率": spread_rate,
                         "賣出試算價": seller_price,
                         "試算價來源": seller_source,
                         "IV": quote.implied_volatility,
@@ -274,16 +288,17 @@ class RefreshService:
                         "股息殖利率": snapshot.dividend_yield,
                         "Greeks模型": "Black-Scholes-Merton (估算)",
                         "Delta估算": greeks.delta if greeks else None,
-                        "|Delta|": abs(greeks.delta) if greeks else None,
-                        "Vega估算(每1%)": greeks.vega_per_pct if greeks else None,
+                        "Gamma估算": greeks.gamma if greeks else None,
                         "Theta估算(每日)": greeks.theta_per_day if greeks else None,
+                        "Vega估算(每1%)": greeks.vega_per_pct if greeks else None,
+                        "|Delta|": abs(greeks.delta) if greeks else None,
                         "DTE": dte,
                         "年化報酬率": annual_return,
                         "年化本金": capital_basis,
                         "成交量": quote.volume,
                         "未平倉": quote.open_interest,
                         "Delta條件結果": evaluation.delta_result,
-                        "Vega條件結果": evaluation.vega_result,
+                        "Bid-Ask價差條件結果": evaluation.spread_result,
                         "年化報酬率條件結果": evaluation.annual_return_result,
                         "未平倉條件結果": evaluation.open_interest_result,
                         "全部條件符合": overall_result,
@@ -303,7 +318,11 @@ class RefreshService:
                                 "option_type": quote.option_type,
                                 "strike": quote.strike,
                                 "bid": seller_price,
+                                "ask": quote.ask,
+                                "spread_rate": spread_rate,
                                 "delta": greeks.delta if greeks else None,
+                                "gamma": greeks.gamma if greeks else None,
+                                "theta": greeks.theta_per_day if greeks else None,
                                 "vega": greeks.vega_per_pct if greeks else None,
                                 "annual_return": annual_return,
                                 "open_interest": quote.open_interest,
@@ -364,6 +383,7 @@ class RefreshService:
                     "errors": error_count,
                     "invalid_rows": invalid_rows,
                     "market_open": is_open,
+                    "close_update": session.just_closed,
                 },
                 ensure_ascii=False,
             ),
@@ -375,6 +395,7 @@ class RefreshService:
             "errors": error_count,
             "invalid_rows": invalid_rows,
             "market_open": is_open,
+            "close_update": session.just_closed,
         }
 
     def _error_update(
@@ -413,8 +434,13 @@ class RefreshService:
             "already_written": already_written,
         }
 
-    def _skip(self, reason: str, now: datetime, next_run: datetime) -> dict[str, Any]:
+    def _skip(
+        self, reason: str, now: datetime, next_run: datetime | None
+    ) -> dict[str, Any]:
         self.repository.update_settings(
             {"最後執行(UTC)": now.isoformat(), "最後狀態": reason}
         )
-        return {"status": "skipped", "reason": reason, "next_run": next_run.isoformat()}
+        result = {"status": "skipped", "reason": reason}
+        if next_run is not None:
+            result["next_run"] = next_run.isoformat()
+        return result

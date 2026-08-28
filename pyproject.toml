@@ -1,6 +1,6 @@
 [project]
 name = "option-alerts"
-version = "0.4.0"
+version = "0.5.0"
 description = "Yahoo Finance option alerts synchronized to Google Sheets"
 requires-python = ">=3.11"
 

@@ -89,8 +89,8 @@ class ScanRecord:
     display_type: str
     delta_operator: str
     delta_threshold: float | None
-    vega_operator: str
-    vega_threshold: float | None
+    spread_operator: str
+    spread_threshold: float | None
     annual_return_operator: str
     annual_return_threshold: float | None
     call_cost_basis: float | None
@@ -110,7 +110,7 @@ class ScanRecord:
             threshold is not None
             for threshold in (
                 self.delta_threshold,
-                self.vega_threshold,
+                self.spread_threshold,
                 self.annual_return_threshold,
                 self.open_interest_min,
             )
@@ -121,7 +121,7 @@ class ScanRecord:
         payload = {
             "display_type": self.display_type,
             "delta": [self.delta_operator, self.delta_threshold],
-            "vega": [self.vega_operator, self.vega_threshold],
+            "bid_ask_spread": [self.spread_operator, self.spread_threshold],
             "annual_return": [
                 self.annual_return_operator,
                 self.annual_return_threshold,
@@ -151,8 +151,8 @@ class ScanRecord:
         )
         if delta_threshold is not None and delta_threshold > 1:
             raise ValueError("Delta門檻必須介於 0 與 1")
-        vega_operator, vega_threshold = _paired_condition(
-            values, "Vega條件", "Vega門檻"
+        spread_operator, spread_threshold = _paired_condition(
+            values, "Bid-Ask價差條件", "Bid-Ask價差門檻"
         )
         annual_operator, annual_threshold = _paired_condition(
             values, "年化報酬率條件", "年化報酬率門檻"
@@ -182,8 +182,8 @@ class ScanRecord:
             display_type=display_type,
             delta_operator=delta_operator,
             delta_threshold=delta_threshold,
-            vega_operator=vega_operator,
-            vega_threshold=vega_threshold,
+            spread_operator=spread_operator,
+            spread_threshold=spread_threshold,
             annual_return_operator=annual_operator,
             annual_return_threshold=annual_threshold,
             call_cost_basis=call_cost_basis,
@@ -221,6 +221,7 @@ class ChainSnapshot:
 @dataclass(slots=True, frozen=True)
 class Greeks:
     delta: float
+    gamma: float
     vega_per_pct: float
     theta_per_day: float
     dte: int
@@ -231,7 +232,7 @@ class ConditionEvaluation:
     has_active_conditions: bool
     matched: bool | None
     delta_result: str
-    vega_result: str
+    spread_result: str
     annual_return_result: str
     open_interest_result: str
 

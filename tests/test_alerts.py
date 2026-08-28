@@ -32,7 +32,7 @@ class AlertTests(unittest.TestCase):
         result = evaluate_conditions(
             scan=scan,
             delta=-0.30,
-            vega=0.20,
+            spread_rate=0.20,
             annual_return=0.18,
             open_interest=101,
         )
@@ -44,7 +44,7 @@ class AlertTests(unittest.TestCase):
         result = evaluate_conditions(
             scan=scan,
             delta=-0.30,
-            vega=0.20,
+            spread_rate=0.20,
             annual_return=None,
             open_interest=101,
         )
@@ -55,7 +55,7 @@ class AlertTests(unittest.TestCase):
         result = evaluate_conditions(
             scan=scan,
             delta=-0.30,
-            vega=0.20,
+            spread_rate=0.20,
             annual_return=0.18,
             open_interest=100,
         )
@@ -66,7 +66,7 @@ class AlertTests(unittest.TestCase):
         evaluation = evaluate_conditions(
             scan=make_scan(),
             delta=-0.30,
-            vega=0.20,
+            spread_rate=0.20,
             annual_return=0.18,
             open_interest=101,
         )
@@ -93,7 +93,7 @@ class AlertTests(unittest.TestCase):
         no_match = evaluate_conditions(
             scan=scan,
             delta=-0.10,
-            vega=0.20,
+            spread_rate=0.20,
             annual_return=0.18,
             open_interest=101,
         )

@@ -4,10 +4,10 @@
 
 ## 執行頻率
 
-- Apps Script 每 5 分鐘做一次輕量檢查，但每個小時只會啟動 GitHub Actions 一次。
-- 自動更新通常落在整點後約 0～5 分鐘；Apps Script 時間觸發器不保證精確到秒。
-- Google Sheet 選單與控制台均提供立即手動更新。
-- 0.4.0 過渡期暫時保留每小時一次的 GitHub 原生排程；Apps Script 成功啟動兩次後再移除。
+- Apps Script 每 5 分鐘做一次輕量檢查，只在美東時間 09:30 開盤後、10:00～15:00 各整點及 16:00 收盤後各啟動一次 GitHub Actions。
+- Python 端使用 CBOE 股票期權交易日曆再次確認交易時段，包括美股休市日與提早收盤日。
+- 盤外不自動更新期權鍊；Google Sheet 選單與控制台的手動更新仍可在盤外使用。
+- 0.5.0 已移除 GitHub workflow 的原生 `schedule`，避免重複執行。
 - GitHub 排程不是即時服務，繁忙時可能延遲或偶爾漏跑。
 
 ## 0. 確認 Google Sheet 與 Apps Script
@@ -15,9 +15,9 @@
 1. 在目標 Google Sheet 的「擴充功能 → Apps Script」放入本專案 `apps-script/Code.gs` 與 `apps-script/Index.html`。
 2. 同時新增本專案 `apps-script/GitHubSetup.html`，並更新 `apps-script/appsscript.json` 權限。
 3. 重新整理 Google Sheet，從「選擇權警示」選單執行「初始化／升級系統」。
-4. 第一次執行時完成 Google 授權；系統會建立 Email、每小時更新檢查與控制台手動更新三個觸發器。
+4. 第一次執行時完成 Google 授權；系統會建立 Email、開盤時段更新檢查與控制台手動更新三個觸發器。
 
-請確認 Apps Script 的 `APP.VERSION` 為 `0.4.0`。升級步驟請見 [UPGRADE_0.4.md](UPGRADE_0.4.md)。
+請確認 Apps Script 的 `APP.VERSION` 為 `0.5.0`。升級步驟請見 [UPGRADE_0.5.md](UPGRADE_0.5.md)。
 
 ## 1. 建立不綁計費的 Google Cloud Project
 
@@ -71,7 +71,7 @@ Google Sheets API 的標準用量不需要額外付費，也不需要啟用 Clou
 4. 回到 Google Sheet，選擇「選擇權警示 → 設定 GitHub 自動更新金鑰」。
 5. 貼上金鑰並確認到期日後按「驗證並儲存」。請勿把金鑰放進儲存格、聊天或 Email。
 6. 執行一次「立即手動更新」，確認 GitHub Actions 出現綠色勾勾且 Sheet 資料更新。
-7. 等待兩個整點更新；「設定」中的「Apps Script 成功啟動次數」達到 2 後，才移除 workflow 的原生 `schedule`。
+7. 在下一個開盤更新時點後，確認「Apps Script 成功啟動次數」增加；workflow 的原生 `schedule` 已由 0.5.0 移除。
 
 ## 注意事項
 
@@ -82,4 +82,4 @@ Google Sheets API 的標準用量不需要額外付費，也不需要啟用 Clou
 
 ## 升級
 
-既有使用者不需重建 `GOOGLE_CREDENTIALS`、`SPREADSHEET_ID` 或服務帳戶。請依 [UPGRADE_0.4.md](UPGRADE_0.4.md) 更新 Apps Script；程式不會刪除或修改舊版分頁。
+既有使用者不需重建 `GOOGLE_CREDENTIALS`、`SPREADSHEET_ID`、GitHub 金鑰或服務帳戶。請依 [UPGRADE_0.5.md](UPGRADE_0.5.md) 更新 Apps Script。

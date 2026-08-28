@@ -22,6 +22,7 @@ class GreeksTests(unittest.TestCase):
         )
         self.assertIsNotNone(result)
         self.assertAlmostEqual(result.delta, 0.63683, places=4)
+        self.assertAlmostEqual(result.gamma, 0.018762, places=6)
         self.assertAlmostEqual(result.vega_per_pct, 0.37524, places=4)
         self.assertAlmostEqual(result.theta_per_day, -0.01757, places=4)
 
@@ -38,6 +39,7 @@ class GreeksTests(unittest.TestCase):
         )
         self.assertIsNotNone(result)
         self.assertAlmostEqual(result.delta, -0.36317, places=4)
+        self.assertAlmostEqual(result.gamma, 0.018762, places=6)
 
     def test_expired_contract_returns_none(self):
         result = calculate_greeks(
@@ -55,4 +57,3 @@ class GreeksTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

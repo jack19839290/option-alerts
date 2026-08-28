@@ -129,16 +129,47 @@ def make_scan(*, baseline=False, fingerprint=""):
 
 
 class ServiceTests(unittest.TestCase):
-    def test_github_schedule_uses_five_minute_market_interval(self):
+    def test_automatic_refresh_skips_outside_option_session(self):
         scan = make_scan()
-        repository = FakeRepository(
-            [scan],
-            {"最後成功抓取(UTC)": "2026-08-27T15:00:00+00:00"},
-        )
-        now = datetime(2026, 8, 27, 15, 4, tzinfo=timezone.utc)
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 22, 0, tzinfo=timezone.utc)
         result = RefreshService(repository, FakeProvider()).refresh(now=now)
         self.assertEqual(result["status"], "skipped")
-        self.assertEqual(result["reason"], "尚未到更新時間")
+        self.assertEqual(result["reason"], "非期權開盤或收盤更新時點")
+
+    def test_manual_refresh_is_allowed_outside_option_session(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 22, 0, tzinfo=timezone.utc)
+        result = RefreshService(repository, FakeProvider()).refresh(force=True, now=now)
+        self.assertEqual(result["status"], "成功")
+        self.assertEqual(result["market_open"], False)
+
+    def test_automatic_refresh_runs_during_option_session(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 14, 0, tzinfo=timezone.utc)
+        result = RefreshService(repository, FakeProvider()).refresh(now=now)
+        self.assertEqual(result["status"], "成功")
+        self.assertEqual(result["market_open"], True)
+
+    def test_close_dispatch_has_grace_window(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 20, 45, tzinfo=timezone.utc)
+        result = RefreshService(repository, FakeProvider()).refresh(now=now)
+        self.assertEqual(result["status"], "成功")
+        self.assertEqual(result["close_update"], True)
+
+    def test_close_dispatch_is_written_only_once(self):
+        scan = make_scan()
+        repository = FakeRepository(
+            [scan], {"最後成功抓取(UTC)": "2026-08-27T20:10:00+00:00"}
+        )
+        now = datetime(2026, 8, 27, 20, 20, tzinfo=timezone.utc)
+        result = RefreshService(repository, FakeProvider()).refresh(now=now)
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "本交易日收盤更新已完成")
 
     def test_first_scan_writes_full_chain_but_does_not_email(self):
         scan = make_scan()
@@ -156,6 +187,8 @@ class ServiceTests(unittest.TestCase):
         call = next(row for row in rows if row["類型"] == "CALL")
         self.assertAlmostEqual(put["年化報酬率"], 3.8 / 55 / put["DTE"] * 365)
         self.assertAlmostEqual(call["年化報酬率"], 6.8 / 60 / call["DTE"] * 365)
+        self.assertAlmostEqual(put["Bid-Ask價差率"], 0.10)
+        self.assertIsNotNone(put["Gamma估算"])
         self.assertEqual(put["通知狀態"], "初次基準")
 
     def test_dividend_yield_warning_is_written_to_data_status(self):
