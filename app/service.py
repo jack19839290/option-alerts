@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .alerts import DISABLED, evaluate_conditions, evaluate_contract_alert
+from .close_trends import build_close_trend_rows, resolve_market_close
 from .greeks import calculate_greeks, time_to_expiry_years
 from .market_clock import get_us_option_session_state
 from .models import ScanRecord, as_bool
@@ -100,6 +101,16 @@ class RefreshService:
         market_timezone = str(settings.get("市場時區") or "America/New_York")
         session = get_us_option_session_state(now, market_timezone)
         is_open = session.is_open
+        capture_close_trend = session.just_closed and not force
+        close_time = (
+            resolve_market_close(
+                now=now,
+                market_close=session.market_close,
+                market_timezone=market_timezone,
+            )
+            if capture_close_trend
+            else None
+        )
 
         if not force and not (session.is_open or session.just_closed):
             return self._skip("非期權開盤或收盤更新時點", now, None)
@@ -142,6 +153,23 @@ class RefreshService:
                 risk_free_symbol, fallback_risk_free
             )
         except RateLimitError as exc:
+            if capture_close_trend and close_time is not None:
+                failure_updates = {
+                    scan.scan_id: self._error_update(
+                        scan, now, "Yahoo 流量限制", str(exc)
+                    )
+                    for scan in active
+                }
+                trend_rows = build_close_trend_rows(
+                    scans=active,
+                    chain_rows={},
+                    scan_updates=failure_updates,
+                    market_close=close_time,
+                    captured_at=now,
+                    market_timezone=market_timezone,
+                    risk_free_rate_source="無法取得",
+                )
+                self.repository.upsert_close_trend_rows(trend_rows)
             return self._rate_limited(settings, now, str(exc))
         risk_free_rate_source = str(
             getattr(provider, "risk_free_rate_source", risk_free_symbol)
@@ -369,6 +397,20 @@ class RefreshService:
         self.repository.update_scan_outputs(headers, scans, updates)
         self.repository.write_chain_sheets(scans, chain_rows)
 
+        close_trend_count = 0
+        if capture_close_trend and close_time is not None:
+            trend_rows = build_close_trend_rows(
+                scans=active,
+                chain_rows=chain_rows,
+                scan_updates=updates,
+                market_close=close_time,
+                captured_at=now,
+                market_timezone=market_timezone,
+                risk_free_rate_source=risk_free_rate_source,
+            )
+            self.repository.upsert_close_trend_rows(trend_rows)
+            close_trend_count = len(trend_rows)
+
         if rate_limit_error:
             return self._rate_limited(settings, now, rate_limit_error, already_written=True)
 
@@ -393,6 +435,7 @@ class RefreshService:
                     "invalid_rows": invalid_rows,
                     "market_open": is_open,
                     "close_update": session.just_closed,
+                    "close_trend_rows": close_trend_count,
                     "risk_free_rate": risk_free_rate,
                     "risk_free_rate_source": risk_free_rate_source,
                 },
@@ -407,6 +450,7 @@ class RefreshService:
             "invalid_rows": invalid_rows,
             "market_open": is_open,
             "close_update": session.just_closed,
+            "close_trend_rows": close_trend_count,
             "risk_free_rate": risk_free_rate,
             "risk_free_rate_source": risk_free_rate_source,
         }

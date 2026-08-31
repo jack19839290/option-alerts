@@ -1,11 +1,12 @@
 const APP = Object.freeze({
-  VERSION: '0.5.1',
+  VERSION: '0.6.0',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
     SETTINGS: '設定',
     ALERTS: '警示紀錄',
     SYSTEM: '系統紀錄',
+    CLOSE_TRENDS: '收盤Delta趨勢',
   },
   GITHUB: {
     OWNER: 'jack19839290',
@@ -45,6 +46,14 @@ const APP = Object.freeze({
     '寄送時間', '掃描ID', '股票代號', '到期日', '類型', '履約價', 'Bid', 'Delta估算',
     'Vega估算(每1%)', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態',
     'Ask', 'Bid-Ask價差率', 'Gamma估算', 'Theta估算(每日)'
+  ],
+  CLOSE_TREND_HEADERS: [
+    '快照ID', '美東交易日', '官方收盤時間(UTC)', '實際抓取時間(UTC)', '掃描ID', '股票代號',
+    '到期日', '類型', '目標|Delta|', '選取狀態', '合約代號', '履約價', 'Delta估算', '|Delta|',
+    'Delta差距', '標的快照價', 'Last', 'Bid', 'Ask', 'Mid', 'Bid-Ask價差率', '賣出試算價',
+    '試算價來源', '年化本金', 'DTE', '到期權利金報酬率', '年化報酬率', 'IV', 'Gamma估算',
+    'Theta估算(每日)', 'Vega估算(每1%)', '成交量', '未平倉', '最後成交時間', '無風險利率',
+    '無風險利率來源', '股息殖利率', 'Greeks模型', '資料狀態', '備註／未選取原因'
   ],
 });
 
@@ -166,8 +175,9 @@ function setupSystem() {
   if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
   installAutomationTriggers_();
   applyScanFormatting_();
+  applyCloseTrendFormatting_();
   refreshGitHubStatusSettings_();
-  spreadsheet.toast('系統已初始化／升級至 0.5.1；^IRX 利率讀取已修正', '選擇權警示', 7);
+  spreadsheet.toast('系統已初始化／升級至 0.6.0；已建立收盤 Delta 趨勢表', '選擇權警示', 7);
 }
 
 function prepareNextRefresh_() {
@@ -397,6 +407,7 @@ function ensureSystemSheets_() {
     [APP.SHEETS.SETTINGS, ['設定項目', '設定值', '說明']],
     [APP.SHEETS.ALERTS, APP.ALERT_HEADERS],
     [APP.SHEETS.SYSTEM, ['時間(UTC)', '等級', '訊息', '詳細資料']],
+    [APP.SHEETS.CLOSE_TRENDS, APP.CLOSE_TREND_HEADERS],
   ];
   definitions.forEach(([name, headers]) => {
     let sheet = spreadsheet.getSheetByName(name);
@@ -538,7 +549,7 @@ function seedDashboard_() {
     ['1. 從選單「選擇權警示」執行「初始化／升級系統」。'],
     ['2. 在「設定」確認固定通知信箱，再從選單設定 90 天 GitHub 金鑰。'],
     ['3. 用表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。'],
-    ['4. 開盤、盤中整點與收盤自動更新；盤外可勾選 H7 手動更新。'],
+    ['4. 開盤、盤中整點與收盤自動更新；正式收盤會同步保存 Delta 0.10／0.15／0.20 趨勢。'],
     ['5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。'],
     ['6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。'],
   ]);
@@ -622,6 +633,55 @@ function applyScanFormatting_() {
     SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$A2=FALSE').setBackground('#F3F4F6').setRanges([range]).build(),
     SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$S2>0').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
     SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($U2,"不足|過期|限制|失敗|無資料")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
+  ];
+  sheet.setConditionalFormatRules(rules);
+}
+
+function applyCloseTrendFormatting_() {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.CLOSE_TRENDS);
+  if (!sheet) return;
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(10);
+  sheet.getRange(1, 1, 1, APP.CLOSE_TREND_HEADERS.length)
+    .setBackground('#E5E7EB')
+    .setFontWeight('bold')
+    .setFontColor('#111827')
+    .setWrap(true);
+  sheet.getRange('B:B').setNumberFormat('yyyy-mm-dd');
+  sheet.getRange('C:D').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('G:G').setNumberFormat('yyyy-mm-dd');
+  sheet.getRange('I:I').setNumberFormat('0.0000');
+  sheet.getRange('L:T').setNumberFormat('0.0000');
+  sheet.getRange('U:U').setNumberFormat('0.00%');
+  sheet.getRange('V:V').setNumberFormat('0.0000');
+  sheet.getRange('X:X').setNumberFormat('0.0000');
+  sheet.getRange('Y:Y').setNumberFormat('0');
+  sheet.getRange('Z:AB').setNumberFormat('0.00%');
+  sheet.getRange('AC:AE').setNumberFormat('0.0000');
+  sheet.getRange('AF:AG').setNumberFormat('#,##0');
+  sheet.getRange('AH:AH').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('AI:AI').setNumberFormat('0.00%');
+  sheet.getRange('AK:AK').setNumberFormat('0.00%');
+  sheet.setColumnWidths(1, APP.CLOSE_TREND_HEADERS.length, 110);
+  sheet.setColumnWidth(1, 300);
+  sheet.setColumnWidth(5, 180);
+  sheet.setColumnWidth(11, 210);
+  sheet.setColumnWidth(36, 190);
+  sheet.setColumnWidth(38, 220);
+  sheet.setColumnWidth(39, 260);
+  sheet.setColumnWidth(40, 320);
+  const rowCount = Math.max(sheet.getMaxRows() - 1, 1);
+  const range = sheet.getRange(2, 1, rowCount, APP.CLOSE_TREND_HEADERS.length);
+  const rules = [
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND($J2="已選取",$AM2="正常")')
+      .setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=REGEXMATCH($J2&$AM2,"不足|無效|無符合|無資料|未執行")')
+      .setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=REGEXMATCH($J2&$AM2,"失敗|流量限制")')
+      .setBackground('#FEE2E2').setFontColor('#991B1B').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
 }

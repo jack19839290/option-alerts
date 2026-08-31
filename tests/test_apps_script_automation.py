@@ -9,10 +9,16 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_5_1_everywhere(self):
-        self.assertIn("VERSION: '0.5.1'", CODE)
-        self.assertIn('version = "0.5.1"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.5.1"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+    def test_version_is_0_6_0_everywhere(self):
+        self.assertIn("VERSION: '0.6.0'", CODE)
+        self.assertIn('version = "0.6.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.6.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+
+    def test_close_delta_trend_sheet_is_initialized(self):
+        self.assertIn("CLOSE_TRENDS: '收盤Delta趨勢'", CODE)
+        self.assertIn("CLOSE_TREND_HEADERS:", CODE)
+        self.assertIn("function applyCloseTrendFormatting_()", CODE)
+        self.assertIn("applyCloseTrendFormatting_();", CODE)
 
     def test_legacy_migration_and_compatibility_code_are_removed(self):
         for forbidden in (

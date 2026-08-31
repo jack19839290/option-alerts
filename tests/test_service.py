@@ -17,6 +17,7 @@ class FakeRepository:
         self.chain_states = chain_states or {}
         self.scan_updates = None
         self.chain_updates = None
+        self.close_trend_updates = []
         self.logs = []
 
     def load_settings(self):
@@ -33,6 +34,9 @@ class FakeRepository:
 
     def write_chain_sheets(self, scans, rows):
         self.chain_updates = rows
+
+    def upsert_close_trend_rows(self, rows):
+        self.close_trend_updates.extend(rows)
 
     def update_settings(self, updates):
         self.settings.update(updates)
@@ -167,6 +171,18 @@ class ServiceTests(unittest.TestCase):
         result = RefreshService(repository, FakeProvider()).refresh(now=now)
         self.assertEqual(result["status"], "成功")
         self.assertEqual(result["close_update"], True)
+        self.assertEqual(result["close_trend_rows"], 6)
+        self.assertEqual(len(repository.close_trend_updates), 6)
+
+    def test_manual_refresh_during_close_window_does_not_write_close_trend(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 20, 45, tzinfo=timezone.utc)
+        result = RefreshService(repository, FakeProvider()).refresh(force=True, now=now)
+        self.assertEqual(result["status"], "成功")
+        self.assertEqual(result["close_update"], True)
+        self.assertEqual(result["close_trend_rows"], 0)
+        self.assertEqual(repository.close_trend_updates, [])
 
     def test_close_dispatch_is_written_only_once(self):
         scan = make_scan()

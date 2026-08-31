@@ -5,6 +5,8 @@ from typing import Any
 
 from .constants import (
     CHAIN_HEADERS,
+    CLOSE_TREND_HEADERS,
+    CLOSE_TREND_SHEET,
     SCAN_HEADERS,
     SCAN_OUTPUT_HEADERS,
     SCAN_SHEET,
@@ -137,7 +139,9 @@ class SheetsRepository:
     ) -> dict[str, dict[str, dict[str, Any]]]:
         if not scans:
             return {}
-        self._ensure_sheets([scan.sheet_name for scan in scans])
+        self._ensure_sheets(
+            [scan.sheet_name for scan in scans], min_columns=len(CHAIN_HEADERS)
+        )
         end_col = _column_name(len(CHAIN_HEADERS))
         ranges = [
             _sheet_range(scan.sheet_name, f"A1:{end_col}{self.max_monitor_rows}")
@@ -214,7 +218,9 @@ class SheetsRepository:
         targets = [scan for scan in scans if scan.scan_id in chain_rows]
         if not targets:
             return
-        self._ensure_sheets([scan.sheet_name for scan in targets])
+        self._ensure_sheets(
+            [scan.sheet_name for scan in targets], min_columns=len(CHAIN_HEADERS)
+        )
         data: list[dict[str, Any]] = []
         clear_ranges: list[str] = []
         end_col = _column_name(len(CHAIN_HEADERS))
@@ -242,6 +248,101 @@ class SheetsRepository:
             body={"valueInputOption": "USER_ENTERED", "data": data},
         ).execute()
 
+    def upsert_close_trend_rows(self, rows: list[dict[str, Any]]) -> None:
+        """Write one immutable successful close snapshot per daily snapshot ID.
+
+        Failed or incomplete placeholders may be replaced by a later successful retry,
+        while an already selected contract is left unchanged.
+        """
+        if not rows:
+            return
+        self._ensure_sheets(
+            [CLOSE_TREND_SHEET], min_columns=len(CLOSE_TREND_HEADERS)
+        )
+        end_col = _column_name(len(CLOSE_TREND_HEADERS))
+        header_response = (
+            self.service.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(CLOSE_TREND_SHEET, f"A1:{end_col}1"),
+                valueRenderOption="UNFORMATTED_VALUE",
+            )
+            .execute()
+        )
+        header_values = header_response.get("values", [])
+        if not header_values or not any(header_values[0]):
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(CLOSE_TREND_SHEET, f"A1:{end_col}1"),
+                valueInputOption="RAW",
+                body={"values": [CLOSE_TREND_HEADERS]},
+            ).execute()
+        else:
+            existing_headers = [str(value) for value in header_values[0]]
+            if existing_headers != CLOSE_TREND_HEADERS:
+                raise RuntimeError("收盤Delta趨勢欄位與目前版本不一致，請先執行初始化／升級系統")
+
+        existing_response = (
+            self.service.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(CLOSE_TREND_SHEET, "A2:J"),
+                valueRenderOption="UNFORMATTED_VALUE",
+            )
+            .execute()
+        )
+        existing: dict[str, tuple[int, str]] = {}
+        for row_number, values in enumerate(existing_response.get("values", []), start=2):
+            snapshot_id = str(values[0] if values else "").strip()
+            if not snapshot_id or snapshot_id in existing:
+                continue
+            status = str(values[9] if len(values) > 9 else "").strip()
+            existing[snapshot_id] = (row_number, status)
+
+        updates: list[dict[str, Any]] = []
+        appends: list[list[Any]] = []
+        seen_input: set[str] = set()
+        for values in rows:
+            snapshot_id = str(values.get("快照ID") or "").strip()
+            if not snapshot_id or snapshot_id in seen_input:
+                continue
+            seen_input.add(snapshot_id)
+            row_values = [
+                self._serializable(values.get(header, ""))
+                for header in CLOSE_TREND_HEADERS
+            ]
+            prior = existing.get(snapshot_id)
+            if prior is None:
+                appends.append(row_values)
+                continue
+            row_number, prior_status = prior
+            if prior_status == "已選取":
+                continue
+            updates.append(
+                {
+                    "range": _sheet_range(
+                        CLOSE_TREND_SHEET, f"A{row_number}:{end_col}{row_number}"
+                    ),
+                    "values": [row_values],
+                }
+            )
+
+        if updates:
+            self.service.spreadsheets().values().batchUpdate(
+                spreadsheetId=self.spreadsheet_id,
+                body={"valueInputOption": "USER_ENTERED", "data": updates},
+            ).execute()
+        if appends:
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(CLOSE_TREND_SHEET, f"A:{end_col}"),
+                valueInputOption="USER_ENTERED",
+                insertDataOption="INSERT_ROWS",
+                body={"values": appends},
+            ).execute()
+
     def append_system_log(self, level: str, message: str, details: str = "") -> None:
         self.service.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
@@ -260,25 +361,52 @@ class SheetsRepository:
             },
         ).execute()
 
-    def _ensure_sheets(self, titles: list[str]) -> None:
+    def _ensure_sheets(self, titles: list[str], min_columns: int = 26) -> None:
         metadata = (
             self.service.spreadsheets()
-            .get(spreadsheetId=self.spreadsheet_id, fields="sheets.properties")
+            .get(
+                spreadsheetId=self.spreadsheet_id,
+                fields="sheets.properties(sheetId,title,gridProperties(columnCount))",
+            )
             .execute()
         )
-        existing = {sheet["properties"]["title"] for sheet in metadata.get("sheets", [])}
-        requests = [
-            {
-                "addSheet": {
-                    "properties": {
-                        "title": title,
-                        "gridProperties": {"frozenRowCount": 1},
+        existing = {
+            sheet["properties"]["title"]: sheet["properties"]
+            for sheet in metadata.get("sheets", [])
+        }
+        requests: list[dict[str, Any]] = []
+        for title in dict.fromkeys(titles):
+            properties = existing.get(title)
+            if properties is None:
+                requests.append(
+                    {
+                        "addSheet": {
+                            "properties": {
+                                "title": title,
+                                "gridProperties": {
+                                    "frozenRowCount": 1,
+                                    "columnCount": max(26, min_columns),
+                                },
+                            }
+                        }
                     }
-                }
-            }
-            for title in dict.fromkeys(titles)
-            if title not in existing
-        ]
+                )
+                continue
+            column_count = int(
+                properties.get("gridProperties", {}).get("columnCount", 0) or 0
+            )
+            if column_count < min_columns:
+                requests.append(
+                    {
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": properties["sheetId"],
+                                "gridProperties": {"columnCount": min_columns},
+                            },
+                            "fields": "gridProperties.columnCount",
+                        }
+                    }
+                )
         if requests:
             self.service.spreadsheets().batchUpdate(
                 spreadsheetId=self.spreadsheet_id, body={"requests": requests}

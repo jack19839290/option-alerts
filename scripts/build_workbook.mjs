@@ -15,6 +15,7 @@ const scans = workbook.worksheets.add("掃描設定");
 const settings = workbook.worksheets.add("設定");
 const alertLog = workbook.worksheets.add("警示紀錄");
 const systemLog = workbook.worksheets.add("系統紀錄");
+const closeTrend = workbook.worksheets.add("收盤Delta趨勢");
 
 const scanHeaders = [
   "啟用", "掃描ID", "股票代號", "到期日", "顯示類型", "Delta條件", "Delta門檻",
@@ -28,6 +29,15 @@ const alertHeaders = [
   "寄送時間", "掃描ID", "股票代號", "到期日", "類型", "履約價", "Bid", "Delta估算",
   "Vega估算(每1%)", "年化報酬率", "未平倉", "DTE", "合約代號", "收件信箱", "寄送狀態",
   "Ask", "Bid-Ask價差率", "Gamma估算", "Theta估算(每日)",
+];
+
+const closeTrendHeaders = [
+  "快照ID", "美東交易日", "官方收盤時間(UTC)", "實際抓取時間(UTC)", "掃描ID", "股票代號",
+  "到期日", "類型", "目標|Delta|", "選取狀態", "合約代號", "履約價", "Delta估算", "|Delta|",
+  "Delta差距", "標的快照價", "Last", "Bid", "Ask", "Mid", "Bid-Ask價差率", "賣出試算價",
+  "試算價來源", "年化本金", "DTE", "到期權利金報酬率", "年化報酬率", "IV", "Gamma估算",
+  "Theta估算(每日)", "Vega估算(每1%)", "成交量", "未平倉", "最後成交時間", "無風險利率",
+  "無風險利率來源", "股息殖利率", "Greeks模型", "資料狀態", "備註／未選取原因",
 ];
 
 // 控制台
@@ -101,7 +111,7 @@ dashboard.getRange("A13:A18").values = [
   ["1. 在 Google Sheets 選單「選擇權警示」執行「初始化／升級系統」。"],
   ["2. 在「設定」填入固定通知信箱，再從選單設定 90 天 GitHub 金鑰。"],
   ["3. 透過表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。"],
-  ["4. 開盤、盤中整點與收盤自動更新；盤外也可勾選 H7 立即手動更新。"],
+  ["4. 開盤、盤中整點與收盤自動更新；正式收盤會保存 Delta 0.10／0.15／0.20 趨勢。"],
   ["5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。"],
   ["6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。"],
 ];
@@ -197,6 +207,53 @@ scans.getRange("P:AA").format.columnWidthPx = 115;
 scans.getRange("V:V").format.columnWidthPx = 260;
 scans.getRange("X:X").format.columnWidthPx = 260;
 
+// 收盤 Delta 趨勢：長表格，每個交易日／掃描／類型／目標 Delta 一列。
+closeTrend.getRange("A1:AN1").values = [closeTrendHeaders];
+closeTrend.getRange("A1:AN1").format = {
+  fill: "#E5E7EB",
+  font: { bold: true, color: "#111827" },
+  rowHeight: 42,
+  wrapText: true,
+  verticalAlignment: "center",
+};
+closeTrend.freezePanes.freezeRows(1);
+closeTrend.freezePanes.freezeColumns(10);
+closeTrend.getRange("A:AN").format.columnWidthPx = 110;
+closeTrend.getRange("A:A").format.columnWidthPx = 300;
+closeTrend.getRange("E:E").format.columnWidthPx = 180;
+closeTrend.getRange("K:K").format.columnWidthPx = 210;
+closeTrend.getRange("AJ:AJ").format.columnWidthPx = 190;
+closeTrend.getRange("AL:AL").format.columnWidthPx = 220;
+closeTrend.getRange("AM:AM").format.columnWidthPx = 260;
+closeTrend.getRange("AN:AN").format.columnWidthPx = 320;
+closeTrend.getRange("B:B").format.numberFormat = "yyyy-mm-dd";
+closeTrend.getRange("C:D").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
+closeTrend.getRange("G:G").format.numberFormat = "yyyy-mm-dd";
+closeTrend.getRange("I:I").format.numberFormat = "0.0000";
+closeTrend.getRange("L:T").format.numberFormat = "0.0000";
+closeTrend.getRange("U:U").format.numberFormat = "0.00%";
+closeTrend.getRange("V:V").format.numberFormat = "0.0000";
+closeTrend.getRange("X:X").format.numberFormat = "0.0000";
+closeTrend.getRange("Y:Y").format.numberFormat = "0";
+closeTrend.getRange("Z:AB").format.numberFormat = "0.00%";
+closeTrend.getRange("AC:AE").format.numberFormat = "0.0000";
+closeTrend.getRange("AF:AG").format.numberFormat = "#,##0";
+closeTrend.getRange("AH:AH").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
+closeTrend.getRange("AI:AI").format.numberFormat = "0.00%";
+closeTrend.getRange("AK:AK").format.numberFormat = "0.00%";
+closeTrend.getRange("A2:AN1000").conditionalFormats.addCustom(
+  '=AND($J2="已選取",$AM2="正常")',
+  { fill: "#DCFCE7", font: { color: "#166534" } },
+);
+closeTrend.getRange("A2:AN1000").conditionalFormats.addCustom(
+  '=REGEXMATCH($J2&$AM2,"不足|無效|無符合|無資料|未執行")',
+  { fill: "#FEF3C7", font: { color: "#92400E" } },
+);
+closeTrend.getRange("A2:AN1000").conditionalFormats.addCustom(
+  '=REGEXMATCH($J2&$AM2,"失敗|流量限制")',
+  { fill: "#FEE2E2", font: { color: "#991B1B" } },
+);
+
 // 設定
 const settingsRows = [
   ["設定項目", "設定值", "說明"],
@@ -212,7 +269,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.5.1", "目前規格版本"],
+  ["系統版本", "0.6.0", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
@@ -270,10 +327,15 @@ const previewRanges = {
   "設定": "A1:C19",
   "警示紀錄": "A1:S5",
   "系統紀錄": "A1:D5",
+  "收盤Delta趨勢": "A1:AN5",
 };
 for (const [sheetName, range] of Object.entries(previewRanges)) {
   const preview = await workbook.render({ sheetName, range, scale: 1.4, format: "png" });
   await fs.writeFile(`${outputDir}/${sheetName}.png`, new Uint8Array(await preview.arrayBuffer()));
+}
+for (const [suffix, range] of [["前段", "A1:T5"], ["後段", "U1:AN5"]]) {
+  const preview = await workbook.render({ sheetName: "收盤Delta趨勢", range, scale: 1.4, format: "png" });
+  await fs.writeFile(`${outputDir}/收盤Delta趨勢_${suffix}.png`, new Uint8Array(await preview.arrayBuffer()));
 }
 const scanOutputPreview = await workbook.render({ sheetName: "掃描設定", range: "P1:AA5", scale: 1.4, format: "png" });
 await fs.writeFile(`${outputDir}/掃描設定_系統欄.png`, new Uint8Array(await scanOutputPreview.arrayBuffer()));
@@ -294,6 +356,14 @@ const scanCheck = await workbook.inspect({
   tableMaxCols: 30,
 });
 console.log(scanCheck.ndjson);
+const trendCheck = await workbook.inspect({
+  kind: "table",
+  range: "收盤Delta趨勢!A1:AN3",
+  include: "values,formulas",
+  tableMaxRows: 4,
+  tableMaxCols: 42,
+});
+console.log(trendCheck.ndjson);
 
 const output = await SpreadsheetFile.exportXlsx(workbook);
 await output.save(`${outputDir}/選擇權警示.xlsx`);

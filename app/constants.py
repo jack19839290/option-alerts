@@ -2,6 +2,7 @@ SCAN_SHEET = "掃描設定"
 SETTINGS_SHEET = "設定"
 ALERT_LOG_SHEET = "警示紀錄"
 SYSTEM_LOG_SHEET = "系統紀錄"
+CLOSE_TREND_SHEET = "收盤Delta趨勢"
 
 SCAN_HEADERS = [
     "啟用",
@@ -77,6 +78,51 @@ CHAIN_HEADERS = [
     "資料狀態",
 ]
 
+CLOSE_TREND_TARGETS = (0.10, 0.15, 0.20)
+
+CLOSE_TREND_HEADERS = [
+    "快照ID",
+    "美東交易日",
+    "官方收盤時間(UTC)",
+    "實際抓取時間(UTC)",
+    "掃描ID",
+    "股票代號",
+    "到期日",
+    "類型",
+    "目標|Delta|",
+    "選取狀態",
+    "合約代號",
+    "履約價",
+    "Delta估算",
+    "|Delta|",
+    "Delta差距",
+    "標的快照價",
+    "Last",
+    "Bid",
+    "Ask",
+    "Mid",
+    "Bid-Ask價差率",
+    "賣出試算價",
+    "試算價來源",
+    "年化本金",
+    "DTE",
+    "到期權利金報酬率",
+    "年化報酬率",
+    "IV",
+    "Gamma估算",
+    "Theta估算(每日)",
+    "Vega估算(每1%)",
+    "成交量",
+    "未平倉",
+    "最後成交時間",
+    "無風險利率",
+    "無風險利率來源",
+    "股息殖利率",
+    "Greeks模型",
+    "資料狀態",
+    "備註／未選取原因",
+]
+
 SETTINGS_DEFAULTS = {
     "通知信箱": "",
     "自動更新規則": "開盤、盤中整點、收盤",
@@ -89,7 +135,7 @@ SETTINGS_DEFAULTS = {
     "市場時區": "America/New_York",
     "Cloud Run URL": "",
     "Web App URL": "",
-    "系統版本": "0.5.1",
+    "系統版本": "0.6.0",
     "下次允許抓取(UTC)": "",
     "連續失敗次數": 0,
     "最後成功抓取(UTC)": "",
