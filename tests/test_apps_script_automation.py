@@ -9,10 +9,23 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_6_0_everywhere(self):
-        self.assertIn("VERSION: '0.6.0'", CODE)
-        self.assertIn('version = "0.6.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.6.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+    def test_version_is_0_6_1_everywhere(self):
+        self.assertIn("VERSION: '0.6.1'", CODE)
+        self.assertIn('version = "0.6.1"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.6.1"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+
+    def test_continuing_matches_stay_green(self):
+        formatter = re.search(
+            r"function applyChainConditionalFormatting_\(sheet\) \{(.*?)\n\}",
+            CODE,
+            re.S,
+        )
+        self.assertIsNotNone(formatter)
+        self.assertIn('$AF2="持續符合"', formatter.group(1))
+        self.assertIn("function applyAllChainFormatting_()", CODE)
+        setup = re.search(r"function setupSystem\(\) \{(.*?)\n\}", CODE, re.S)
+        self.assertIsNotNone(setup)
+        self.assertIn("applyAllChainFormatting_();", setup.group(1))
 
     def test_close_delta_trend_sheet_is_initialized(self):
         self.assertIn("CLOSE_TRENDS: '收盤Delta趨勢'", CODE)

@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.6.0',
+  VERSION: '0.6.1',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -175,9 +175,10 @@ function setupSystem() {
   if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
   installAutomationTriggers_();
   applyScanFormatting_();
+  applyAllChainFormatting_();
   applyCloseTrendFormatting_();
   refreshGitHubStatusSettings_();
-  spreadsheet.toast('系統已初始化／升級至 0.6.0；已建立收盤 Delta 趨勢表', '選擇權警示', 7);
+  spreadsheet.toast('系統已初始化／升級至 0.6.1；持續符合的合約會維持綠色標示', '選擇權警示', 7);
 }
 
 function prepareNextRefresh_() {
@@ -720,10 +721,29 @@ function clearPlaceholderCheckboxValues_(sheet) {
 function applyChainConditionalFormatting_(sheet) {
   const range = sheet.getRange('A2:AL1000');
   const rules = [
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$AE2="符合"').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AE2="符合",$AF2="持續符合")').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
     SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AE2="資料不足",REGEXMATCH($AL2,"不足|無效"))').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
+}
+
+function applyAllChainFormatting_() {
+  const spreadsheet = getSpreadsheet_();
+  const scans = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
+  if (!scans || scans.getLastRow() < 2) return;
+  const headers = scans.getRange(1, 1, 1, scans.getLastColumn()).getValues()[0].map(String);
+  const sheetNameIndex = headers.indexOf('工作表');
+  if (sheetNameIndex < 0) return;
+  const sheetNames = scans
+    .getRange(2, sheetNameIndex + 1, scans.getLastRow() - 1, 1)
+    .getValues()
+    .flat()
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  [...new Set(sheetNames)].forEach(sheetName => {
+    const sheet = spreadsheet.getSheetByName(sheetName);
+    if (sheet) applyChainConditionalFormatting_(sheet);
+  });
 }
 
 function getSettings_() {

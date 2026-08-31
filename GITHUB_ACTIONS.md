@@ -17,7 +17,7 @@
 3. 重新整理 Google Sheet，從「選擇權警示」選單執行「初始化／升級系統」。
 4. 第一次執行時完成 Google 授權；系統會建立 Email、開盤時段更新檢查與控制台手動更新三個觸發器。
 
-請確認 Apps Script 的 `APP.VERSION` 為 `0.6.0`。升級步驟請見 [UPGRADE_0.6.md](UPGRADE_0.6.md)。
+請確認 Apps Script 的 `APP.VERSION` 為 `0.6.1`。升級步驟請見 [UPGRADE_0.6.md](UPGRADE_0.6.md)。
 
 ## 1. 建立不綁計費的 Google Cloud Project
 
