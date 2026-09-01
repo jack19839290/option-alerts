@@ -9,10 +9,15 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_6_1_everywhere(self):
-        self.assertIn("VERSION: '0.6.1'", CODE)
-        self.assertIn('version = "0.6.1"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.6.1"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+    def test_version_is_0_6_2_everywhere(self):
+        self.assertIn("VERSION: '0.6.2'", CODE)
+        self.assertIn('version = "0.6.2"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.6.2"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+
+    def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
+        self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)
+        self.assertIn("normalizeUserFacingTimestamps_();", CODE)
+        self.assertIn("function parseIsoTimestamp_(value)", CODE)
 
     def test_continuing_matches_stay_green(self):
         formatter = re.search(

@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from app.constants import CLOSE_TREND_HEADERS, SCAN_HEADERS
 from app.sheets import SheetsRepository, _is_blank_scan_row
@@ -94,6 +95,28 @@ class ScanRowTests(unittest.TestCase):
         row = [False, "MU|2027-01-15", "MU", "2027-01-15", "ALL"]
 
         self.assertFalse(_is_blank_scan_row(SCAN_HEADERS, row))
+
+
+class TimestampSerializationTests(unittest.TestCase):
+    def test_user_facing_timestamp_uses_taipei_wall_clock(self):
+        repository = object.__new__(SheetsRepository)
+        repository.display_timezone = "Asia/Taipei"
+        source = datetime(2026, 9, 1, 15, 3, 46, tzinfo=timezone.utc)
+
+        serial = repository._serializable(source, "最後抓取時間")
+        displayed = datetime(1899, 12, 30) + timedelta(days=serial)
+
+        self.assertEqual(displayed, datetime(2026, 9, 1, 23, 3, 46))
+
+    def test_explicit_utc_timestamp_keeps_utc_wall_clock(self):
+        repository = object.__new__(SheetsRepository)
+        repository.display_timezone = "Asia/Taipei"
+        source = datetime(2026, 9, 1, 15, 3, 46, tzinfo=timezone.utc)
+
+        serial = repository._serializable(source, "實際抓取時間(UTC)")
+        displayed = datetime(1899, 12, 30) + timedelta(days=serial)
+
+        self.assertEqual(displayed, datetime(2026, 9, 1, 15, 3, 46))
 
 
 class CloseTrendWriteTests(unittest.TestCase):

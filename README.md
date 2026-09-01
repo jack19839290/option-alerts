@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.6.1`
+目前版本：`0.6.2`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算 Greeks 與賣出權利金年化報酬率，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 
@@ -29,7 +29,7 @@
 - 更新要求第一次失敗會立即寄信；持續失敗期間每 24 小時最多提醒一次，恢復時再通知一次。
 - 遇到 Yahoo 流量限制時採 15／30／60 分鐘退避，不繞過限制。
 
-## 升級至 0.6.1
+## 升級至 0.6.2
 
 請依照 [UPGRADE_0.6.md](UPGRADE_0.6.md) 操作。執行 Apps Script 的 `setupSystem` 時：
 
@@ -47,7 +47,7 @@ infra/deploy.ps1     選用的 Google Cloud 部署腳本
 scripts/             Google Sheets 範本產生器
 tests/               定價、Greeks、條件、基準與更新流程測試
 GITHUB_ACTIONS.md     GitHub Actions 免費部署與授權步驟
-UPGRADE_0.6.md        0.6.1 升級與驗證說明
+UPGRADE_0.6.md        0.6.2 升級與驗證說明
 UPGRADE_0.5.md        0.5.1 舊版升級說明
 DEPLOYMENT.md         選用的 Cloud Run 部署步驟
 ```
@@ -63,6 +63,7 @@ python -m venv .venv
 ## 重要限制
 
 - `yfinance` 是非官方 Yahoo Finance 介面，資料可能延遲、缺漏、變更或暫時無法取得，不應視為交易所即時行情。
+- 一般工作表時間依「設定 → 顯示時區」顯示，預設為 `Asia/Taipei`；欄位名稱含 `(UTC)` 的系統稽核時間仍使用 UTC。
 - Yahoo 未平倉量可能不是即時更新；系統只使用當次實際取得的數值。
 - Greeks 是模型估算，不是 Yahoo 原始欄位；輸入包含標的價格、Yahoo IV、利率、股息殖利率與剩餘時間。
 - 年化報酬率未扣除手續費、稅金、股息、融資成本、滑價及提前指派風險。

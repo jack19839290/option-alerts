@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .constants import (
     CHAIN_HEADERS,
@@ -15,6 +16,26 @@ from .constants import (
     SYSTEM_LOG_SHEET,
 )
 from .models import ScanRecord
+
+
+SHEETS_DATETIME_EPOCH = datetime(1899, 12, 30)
+
+
+def _valid_timezone_name(value: Any, fallback: str = "Asia/Taipei") -> str:
+    name = str(value or "").strip() or fallback
+    try:
+        ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return fallback
+    return name
+
+
+def _datetime_to_sheet_serial(value: datetime, timezone_name: str) -> float:
+    """Convert an instant to a Google Sheets serial using the target wall-clock time."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    local_value = value.astimezone(ZoneInfo(timezone_name)).replace(tzinfo=None)
+    return (local_value - SHEETS_DATETIME_EPOCH).total_seconds() / 86400
 
 
 def _column_name(index: int) -> str:
@@ -54,6 +75,7 @@ class SheetsRepository:
         )
         self.spreadsheet_id = spreadsheet_id
         self.max_monitor_rows = max_monitor_rows
+        self.display_timezone = "Asia/Taipei"
         self.service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
 
     def load_settings(self) -> dict[str, Any]:
@@ -71,6 +93,8 @@ class SheetsRepository:
         for row in response.get("values", []):
             if len(row) >= 2 and str(row[0]).strip():
                 settings[str(row[0]).strip()] = row[1]
+        self.display_timezone = _valid_timezone_name(settings.get("顯示時區"))
+        settings["顯示時區"] = self.display_timezone
         return settings
 
     def update_settings(self, updates: dict[str, Any]) -> None:
@@ -192,7 +216,10 @@ class SheetsRepository:
             merged = dict(scan.values)
             merged.update(row_update)
             row_values = [
-                [self._serializable(merged.get(header, "")) for header in SCAN_OUTPUT_HEADERS]
+                [
+                    self._serializable(merged.get(header, ""), header)
+                    for header in SCAN_OUTPUT_HEADERS
+                ]
             ]
             data.append(
                 {
@@ -228,7 +255,10 @@ class SheetsRepository:
             rows = [CHAIN_HEADERS]
             for values in chain_rows[scan.scan_id]:
                 rows.append(
-                    [self._serializable(values.get(header, "")) for header in CHAIN_HEADERS]
+                    [
+                        self._serializable(values.get(header, ""), header)
+                        for header in CHAIN_HEADERS
+                    ]
                 )
             clear_ranges.append(
                 _sheet_range(scan.sheet_name, f"A2:{end_col}{self.max_monitor_rows}")
@@ -310,7 +340,7 @@ class SheetsRepository:
                 continue
             seen_input.add(snapshot_id)
             row_values = [
-                self._serializable(values.get(header, ""))
+                self._serializable(values.get(header, ""), header)
                 for header in CLOSE_TREND_HEADERS
             ]
             prior = existing.get(snapshot_id)
@@ -412,10 +442,18 @@ class SheetsRepository:
                 spreadsheetId=self.spreadsheet_id, body={"requests": requests}
             ).execute()
 
-    @staticmethod
-    def _serializable(value: Any) -> Any:
+    def _serializable(self, value: Any, header: str = "") -> Any:
         if value is None:
             return ""
-        if isinstance(value, (datetime, date)):
+        if isinstance(value, datetime):
+            target_timezone = (
+                "UTC"
+                if "(UTC)" in header
+                else _valid_timezone_name(
+                    getattr(self, "display_timezone", "Asia/Taipei")
+                )
+            )
+            return _datetime_to_sheet_serial(value, target_timezone)
+        if isinstance(value, date):
             return value.isoformat()
         return value

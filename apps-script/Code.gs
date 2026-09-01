@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.6.1',
+  VERSION: '0.6.2',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -169,16 +169,26 @@ function setupSystem() {
   ensureSystemSheets_();
   const settingsSheet = spreadsheet.getSheetByName(APP.SHEETS.SETTINGS);
   const settings = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 2).getValues();
+  const displayTimezoneRow = settings.findIndex(row => row[0] === '顯示時區');
+  const displayTimezone = displayTimezoneRow >= 0
+    ? String(settings[displayTimezoneRow][1] || 'Asia/Taipei').trim()
+    : 'Asia/Taipei';
+  try {
+    spreadsheet.setSpreadsheetTimeZone(displayTimezone);
+  } catch (error) {
+    throw new Error(`顯示時區「${displayTimezone}」無效，請在設定分頁填入 Asia/Taipei 等有效時區`);
+  }
   const spreadsheetIdRow = settings.findIndex(row => row[0] === 'Spreadsheet ID');
   if (spreadsheetIdRow >= 0) settingsSheet.getRange(spreadsheetIdRow + 2, 2).setValue(spreadsheet.getId());
   const versionRow = settings.findIndex(row => row[0] === '系統版本');
   if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
   installAutomationTriggers_();
+  normalizeUserFacingTimestamps_();
   applyScanFormatting_();
   applyAllChainFormatting_();
   applyCloseTrendFormatting_();
   refreshGitHubStatusSettings_();
-  spreadsheet.toast('系統已初始化／升級至 0.6.1；持續符合的合約會維持綠色標示', '選擇權警示', 7);
+  spreadsheet.toast(`系統已初始化／升級至 0.6.2；工作表時間使用 ${displayTimezone}`, '選擇權警示', 7);
 }
 
 function prepareNextRefresh_() {
@@ -478,7 +488,7 @@ function seedSettings_() {
     ['無風險利率代號', '^IRX', 'Yahoo 13 週國庫券指標'],
     ['備援無風險利率', 0.05, '^IRX 失敗時採用'],
     ['預設股息殖利率', 0, 'Yahoo 缺失時採用'],
-    ['顯示時區', 'Asia/Taipei', '使用者介面與工作表'],
+    ['顯示時區', 'Asia/Taipei', '使用者介面與工作表；修改後請重新執行初始化／升級系統'],
     ['市場時區', 'America/New_York', '到期與市場時段判斷'],
     ['Cloud Run URL', '', '選用部署後填入'],
     ['Web App URL', '', 'Apps Script 部署後填入'],
@@ -744,6 +754,62 @@ function applyAllChainFormatting_() {
     const sheet = spreadsheet.getSheetByName(sheetName);
     if (sheet) applyChainConditionalFormatting_(sheet);
   });
+}
+
+function normalizeUserFacingTimestamps_() {
+  const spreadsheet = getSpreadsheet_();
+  const scans = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
+  if (scans) normalizeTimestampColumns_(scans, ['最後抓取時間', '最後通知時間']);
+
+  const alerts = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
+  if (alerts) normalizeTimestampColumns_(alerts, ['寄送時間']);
+
+  const closeTrends = spreadsheet.getSheetByName(APP.SHEETS.CLOSE_TRENDS);
+  if (closeTrends) normalizeTimestampColumns_(closeTrends, ['最後成交時間']);
+
+  if (!scans || scans.getLastRow() < 2) return;
+  const headers = scans.getRange(1, 1, 1, scans.getLastColumn()).getValues()[0].map(String);
+  const sheetNameIndex = headers.indexOf('工作表');
+  if (sheetNameIndex < 0) return;
+  const sheetNames = scans
+    .getRange(2, sheetNameIndex + 1, scans.getLastRow() - 1, 1)
+    .getValues()
+    .flat()
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  [...new Set(sheetNames)].forEach(sheetName => {
+    const sheet = spreadsheet.getSheetByName(sheetName);
+    if (sheet) normalizeTimestampColumns_(sheet, ['最後成交時間', '最後抓取時間']);
+  });
+}
+
+function normalizeTimestampColumns_(sheet, headerNames) {
+  if (sheet.getLastRow() < 2 || sheet.getLastColumn() < 1) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  headerNames.forEach(headerName => {
+    const columnIndex = headers.indexOf(headerName);
+    if (columnIndex < 0) return;
+    const range = sheet.getRange(2, columnIndex + 1, sheet.getLastRow() - 1, 1);
+    let changed = false;
+    const values = range.getValues().map(([value]) => {
+      const normalized = parseIsoTimestamp_(value);
+      if (normalized !== value) changed = true;
+      return [normalized];
+    });
+    if (changed) range.setValues(values);
+  });
+}
+
+function parseIsoTimestamp_(value) {
+  if (value instanceof Date || typeof value !== 'string') return value;
+  const text = value.trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/);
+  if (!match) return value;
+  const milliseconds = match[2]
+    ? `.${match[2].slice(0, 3).padEnd(3, '0')}`
+    : '';
+  const parsed = new Date(`${match[1]}${milliseconds}${match[3]}`);
+  return Number.isNaN(parsed.getTime()) ? value : parsed;
 }
 
 function getSettings_() {
