@@ -34,7 +34,8 @@ const scanHeaders = [
 const alertHeaders = [
   "寄送時間", "掃描ID", "股票代號", "到期日", "類型", "履約價", "Bid", "Delta估算",
   "標的股價", "年化報酬率", "未平倉", "DTE", "合約代號", "收件信箱", "寄送狀態",
-  "Ask", "Bid-Ask價差率", "事件ID", "事件類型",
+  "Ask", "Bid-Ask價差率", "事件ID", "事件類型", "門檻", "今日新增", "事件完整性",
+  "失敗掃描", "紀錄ID",
 ];
 
 const closeTrendHeaders = [
@@ -296,7 +297,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.7.0", "目前規格版本"],
+  ["系統版本", "0.7.1", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
@@ -321,16 +322,28 @@ settings.getRange("C:C").format.columnWidthPx = 330;
 settings.freezePanes.freezeRows(1);
 
 // 日誌
-alertLog.getRange("A1:S1").values = [alertHeaders];
-alertLog.getRange("A1:S1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
+alertLog.getRange("A1:X1").values = [alertHeaders];
+alertLog.getRange("A1:X1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
+alertLog.getRange("A2:X4").values = [
+  [new Date("2026-09-09T20:05:00+08:00"), "MU|2027-01-15", "MU", new Date("2027-01-15T12:00:00Z"), "PUT", 55, 3.8, -0.25, 60, 0.18, 350, 100, "MU270115P00055000", "alerts@example.com", "已寄送", 4.2, 0.10, "CLOSE|2026-09-09|INITIAL", "FIRST_CLOSE", "第一門檻", "是", "完整", "", "CLOSE|2026-09-09|INITIAL|MU|2027-01-15|MU270115P00055000"],
+  [new Date("2026-09-09T21:02:00+08:00"), "MU|2027-01-15", "MU", new Date("2027-01-15T12:00:00Z"), "PUT", 55, 3.9, -0.25, 60.2, 0.185, 355, 100, "MU270115P00055000", "alerts@example.com", "已寄送", 4.3, 0.0976, "RT|MU|2027-01-15|2", "SECOND_REALTIME", "第二門檻", "", "完整", "", "RT|MU|2027-01-15|2|MU|2027-01-15|MU270115P00055000"],
+  [new Date("2026-09-10T20:05:00+08:00"), "NVDA|2027-03-19", "NVDA", new Date("2027-03-19T12:00:00Z"), "", "", "", "", "", "", "", "", "", "alerts@example.com", "已寄送（0筆符合）", "", "", "CLOSE|2026-09-10|INITIAL", "FIRST_CLOSE", "第一門檻", "", "完整", "", "CLOSE|2026-09-10|INITIAL|NVDA|2027-03-19|NO_MATCH"],
+];
 alertLog.getRange("A:B").format.columnWidthPx = 180;
 alertLog.getRange("C:L").format.columnWidthPx = 105;
 alertLog.getRange("M:M").format.columnWidthPx = 190;
 alertLog.getRange("N:N").format.columnWidthPx = 230;
 alertLog.getRange("O:O").format.columnWidthPx = 100;
+alertLog.getRange("A2:A4").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
+alertLog.getRange("D2:D4").format.numberFormat = "yyyy-mm-dd";
 alertLog.getRange("J:J").format.numberFormat = "0.00%";
 alertLog.getRange("Q:Q").format.numberFormat = "0.00%";
+alertLog.getRange("R:R").format.columnWidthPx = 260;
+alertLog.getRange("S:V").format.columnWidthPx = 115;
+alertLog.getRange("W:W").format.columnWidthPx = 220;
+alertLog.getRange("X:X").format.columnWidthPx = 320;
 alertLog.freezePanes.freezeRows(1);
+alertLog.freezePanes.freezeColumns(4);
 
 systemLog.getRange("A1:D1").values = [["時間(UTC)", "等級", "訊息", "詳細資料"]];
 systemLog.getRange("A1:D1").format = { fill: "#E5E7EB", font: { bold: true } };
@@ -345,6 +358,7 @@ queue.getRange("A1:O1").format = { fill: "#E5E7EB", font: { bold: true }, wrapTe
 closeState.getRange("A1:J1").values = [["記錄ID", "美東交易日", "掃描ID", "第一條件指紋", "狀態", "符合合約JSON", "最後嘗試時間(UTC)", "成功時間(UTC)", "錯誤訊息", "嘗試次數"]];
 closeState.getRange("A1:J1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
 
+workbook.recalculate();
 const formulaScan = await workbook.inspect({
   kind: "match",
   searchTerm: "#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A",
@@ -357,7 +371,7 @@ const previewRanges = {
   "控制台": "A1:H29",
   "掃描設定": "A1:O5",
   "設定": "A1:C19",
-  "警示紀錄": "A1:S5",
+  "警示紀錄": "A1:X5",
   "系統紀錄": "A1:D5",
   "收盤Delta趨勢": "A1:AP5",
   "MU_2027-01-15": "A1:U5",

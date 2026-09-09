@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.7.0',
+  VERSION: '0.7.1',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -52,7 +52,8 @@ const APP = Object.freeze({
   ALERT_HEADERS: [
     '寄送時間', '掃描ID', '股票代號', '到期日', '類型', '履約價', 'Bid', 'Delta估算',
     '標的股價', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態',
-    'Ask', 'Bid-Ask價差率', '事件ID', '事件類型'
+    'Ask', 'Bid-Ask價差率', '事件ID', '事件類型', '門檻', '今日新增', '事件完整性',
+    '失敗掃描', '紀錄ID'
   ],
   CLOSE_TREND_HEADERS: [
     '快照ID', '美東交易日', '官方收盤時間(UTC)', '實際抓取時間(UTC)', '掃描ID', '股票代號',
@@ -190,7 +191,13 @@ function setupSystem() {
   if (versionRow >= 0) settingsSheet.getRange(versionRow + 2, 2).setValue(APP.VERSION);
   installAutomationTriggers_();
   normalizeUserFacingTimestamps_();
+  try {
+    reconcileSentAlertLogs_();
+  } catch (error) {
+    appendSystemLog_('WARNING', '警示紀錄補登失敗', String(error.message || error).slice(0, 1000));
+  }
   applyScanFormatting_();
+  applyAlertLogFormatting_();
   applyAllChainFormatting_();
   applyCloseTrendFormatting_();
   refreshGitHubStatusSettings_();
@@ -246,7 +253,6 @@ function processPendingEmails() {
         queue.getRange(rowNumber, map['狀態'] + 1).setValue('SENT');
         queue.getRange(rowNumber, map['寄送時間'] + 1).setValue(sentAt);
         queue.getRange(rowNumber, map['最後錯誤'] + 1).clearContent();
-        appendAlertLogForEvent_(row[map['事件ID']], eventType, payload, recipient, sentAt);
       } catch (error) {
         const retries = Number(row[map['重試次數']] || 0) + 1;
         const delayMinutes = Math.min(5 * Math.pow(2, retries - 1), 60);
@@ -255,6 +261,11 @@ function processPendingEmails() {
         queue.getRange(rowNumber, map['下次重試時間'] + 1).setValue(new Date(Date.now() + delayMinutes * 60000));
         queue.getRange(rowNumber, map['最後錯誤'] + 1).setValue(String(error.message || error).slice(0, 1000));
       }
+    }
+    try {
+      reconcileSentAlertLogs_();
+    } catch (error) {
+      appendSystemLog_('WARNING', '警示紀錄補登失敗', String(error.message || error).slice(0, 1000));
     }
   } finally {
     lock.releaseLock();
@@ -286,17 +297,113 @@ function buildQueueEmail_(eventType, payload, spreadsheetUrl) {
   return {subject, body: lines.join('\n'), htmlBody: `${htmlSections.join('')}${warning}<p style="color:#475569;font-size:12px">年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365；不含手續費、稅金及指派風險。</p><p><a href="${escapeHtml_(spreadsheetUrl)}">開啟 Google Sheet</a></p>`};
 }
 
-function appendAlertLogForEvent_(eventId, eventType, payload, recipient, sentAt) {
-  const log = getSpreadsheet_().getSheetByName(APP.SHEETS.ALERTS);
-  if (!log) return;
+function alertThresholdLabel_(eventType) {
+  if (String(eventType || '').indexOf('FIRST_CLOSE') === 0) return '第一門檻';
+  if (String(eventType || '') === 'SECOND_REALTIME') return '第二門檻';
+  return '舊版／其他';
+}
+
+function alertRecordId_(eventId, scanId, contractSymbol, summarySuffix) {
+  return [eventId || 'NO_EVENT', scanId || 'NO_SCAN', contractSymbol || summarySuffix || 'NO_MATCH'].join('|');
+}
+
+function buildAlertLogRowsForEvent_(eventId, eventType, payload, recipient, sentAt) {
+  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  const threshold = alertThresholdLabel_(eventType);
+  const completeness = payload.complete === false ? '資料不完整' : '完整';
+  const failedScans = Array.isArray(payload.failed_scans) ? payload.failed_scans.join('、') : '';
   const rows = [];
-  (payload.groups || []).forEach(group => (group.items || []).forEach(item => rows.push([
-    sentAt, group.scan_id || '', group.ticker || '', group.expiry || '', item.option_type || '',
-    item.strike ?? '', item.bid ?? '', item.delta ?? '', item.underlying_price ?? '', item.annual_return ?? '',
-    item.open_interest ?? '', item.dte ?? '', item.contract_symbol || '', recipient, '已寄送', item.ask ?? '',
-    item.spread_rate ?? '', eventId || '', eventType || ''
-  ])));
-  if (rows.length) log.getRange(log.getLastRow() + 1, 1, rows.length, APP.ALERT_HEADERS.length).setValues(rows);
+  groups.forEach(group => {
+    const items = Array.isArray(group.items) ? group.items : [];
+    if (!items.length) {
+      rows.push([
+        sentAt, group.scan_id || '', group.ticker || '', group.expiry || '', '', '', '', '', '', '', '', '', '',
+        recipient, '已寄送（0筆符合）', '', '', eventId || '', eventType || '', threshold, '', completeness,
+        failedScans, alertRecordId_(eventId, group.scan_id, '', 'NO_MATCH')
+      ]);
+      return;
+    }
+    items.forEach(item => rows.push([
+      sentAt, group.scan_id || '', group.ticker || '', group.expiry || '', item.option_type || '',
+      item.strike ?? '', item.bid ?? '', item.delta ?? '', item.underlying_price ?? '', item.annual_return ?? '',
+      item.open_interest ?? '', item.dte ?? '', item.contract_symbol || '', recipient, '已寄送', item.ask ?? '',
+      item.spread_rate ?? '', eventId || '', eventType || '', threshold,
+      threshold === '第一門檻' ? (item.is_new ? '是' : '否') : '', completeness, failedScans,
+      alertRecordId_(eventId, group.scan_id, item.contract_symbol, 'NO_MATCH')
+    ]));
+  });
+  if (!rows.length) {
+    rows.push([
+      sentAt, '', '', '', '', '', '', '', '', '', '', '', '', recipient, '已寄送（0筆符合）', '', '',
+      eventId || '', eventType || '', threshold, '', completeness, failedScans,
+      alertRecordId_(eventId, '', '', 'EVENT_SUMMARY')
+    ]);
+  }
+  return rows;
+}
+
+function upsertAlertLogRows_(rows) {
+  if (!rows.length) return 0;
+  const log = getSpreadsheet_().getSheetByName(APP.SHEETS.ALERTS);
+  if (!log) return 0;
+  const idIndex = APP.ALERT_HEADERS.indexOf('紀錄ID');
+  const existing = new Map();
+  if (log.getLastRow() >= 2) {
+    log.getRange(2, 1, log.getLastRow() - 1, APP.ALERT_HEADERS.length).getValues()
+      .forEach((row, index) => {
+        const recordId = String(row[idIndex] || '').trim();
+        if (recordId) existing.set(recordId, {rowNumber: index + 2, values: row});
+      });
+  }
+  const thresholdIndex = APP.ALERT_HEADERS.indexOf('門檻');
+  const completenessIndex = APP.ALERT_HEADERS.indexOf('事件完整性');
+  const todayNewIndex = APP.ALERT_HEADERS.indexOf('今日新增');
+  const appendRows = [];
+  let changed = 0;
+  rows.forEach(row => {
+    const recordId = String(row[idIndex] || '').trim();
+    const prior = existing.get(recordId);
+    if (!prior) {
+      appendRows.push(row);
+      existing.set(recordId, {rowNumber: 0, values: row});
+      changed += 1;
+      return;
+    }
+    const needsRepair = !prior.values[thresholdIndex] || !prior.values[completenessIndex]
+      || (row[todayNewIndex] && prior.values[todayNewIndex] !== row[todayNewIndex]);
+    if (needsRepair && prior.rowNumber) {
+      log.getRange(prior.rowNumber, 1, 1, APP.ALERT_HEADERS.length).setValues([row]);
+      changed += 1;
+    }
+  });
+  if (appendRows.length) {
+    log.getRange(log.getLastRow() + 1, 1, appendRows.length, APP.ALERT_HEADERS.length).setValues(appendRows);
+  }
+  return changed;
+}
+
+function reconcileSentAlertLogs_() {
+  const spreadsheet = getSpreadsheet_();
+  const queue = spreadsheet.getSheetByName(APP.SHEETS.QUEUE);
+  const settings = getSettings_();
+  const fallbackRecipient = String(settings['通知信箱'] || '').trim();
+  if (!queue || queue.getLastRow() < 2) return 0;
+  const values = queue.getDataRange().getValues();
+  const map = Object.fromEntries(values[0].map((header, index) => [header, index]));
+  const desiredRows = [];
+  values.slice(1).forEach(row => {
+    if (String(row[map['狀態']] || '') !== 'SENT') return;
+    try {
+      const payload = JSON.parse(String(row[map['內容JSON']] || '{}'));
+      const recipient = String(payload.sent_to || fallbackRecipient);
+      desiredRows.push(...buildAlertLogRowsForEvent_(
+        row[map['事件ID']], row[map['事件類型']], payload, recipient, row[map['寄送時間']] || ''
+      ));
+    } catch (error) {
+      appendSystemLog_('WARNING', '略過無法補登的警示事件', `${row[map['事件ID']] || ''}；${error.message || error}`);
+    }
+  });
+  return upsertAlertLogRows_(desiredRows);
 }
 
 function validateScanInput_(payload) {
@@ -436,9 +543,16 @@ function migrateScanSchema070_(spreadsheet) {
     return output;
   });
   if (sheet.getMaxColumns() < APP.SCAN_HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), APP.SCAN_HEADERS.length - sheet.getMaxColumns());
-  if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.max(headers.length, APP.SCAN_HEADERS.length)).clearContent();
-  sheet.getRange(1, 1, 1, APP.SCAN_HEADERS.length).setValues([APP.SCAN_HEADERS]);
+  if (sheet.getLastRow() > 1) {
+    const rewriteRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.max(headers.length, APP.SCAN_HEADERS.length));
+    rewriteRange.clearDataValidations();
+  }
   if (migrated.length) sheet.getRange(2, 1, migrated.length, APP.SCAN_HEADERS.length).setValues(migrated);
+  sheet.getRange(1, 1, 1, APP.SCAN_HEADERS.length).setValues([APP.SCAN_HEADERS]);
+  if (headers.length > APP.SCAN_HEADERS.length) {
+    sheet.getRange(1, APP.SCAN_HEADERS.length + 1, Math.max(sheet.getLastRow(), 1),
+      headers.length - APP.SCAN_HEADERS.length).clearContent();
+  }
 }
 
 function migrateCloseTrendSchema070_(spreadsheet) {
@@ -466,14 +580,32 @@ function migrateAlertLogSchema070_(spreadsheet) {
   if (!headers.includes('寄送時間') || !headers.includes('合約代號')) return;
   const values = sheet.getLastRow() >= 2 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues() : [];
   const index = Object.fromEntries(headers.map((header, position) => [header, position]));
-  const migrated = values.map(row => APP.ALERT_HEADERS.map(header => {
-    if (header === '事件類型') return 'LEGACY';
-    if (header === '事件ID' || header === '標的股價') return '';
-    return index[header] === undefined ? '' : row[index[header]];
-  }));
-  if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.max(headers.length, APP.ALERT_HEADERS.length)).clearContent();
-  sheet.getRange(1, 1, 1, APP.ALERT_HEADERS.length).setValues([APP.ALERT_HEADERS]);
+  const migrated = values.map((row, rowIndex) => {
+    const oldValue = header => index[header] === undefined ? '' : row[index[header]];
+    const eventId = oldValue('事件ID');
+    const eventType = oldValue('事件類型') || 'LEGACY';
+    const scanId = oldValue('掃描ID');
+    const contractSymbol = oldValue('合約代號');
+    return APP.ALERT_HEADERS.map(header => {
+      if (header === '事件類型') return eventType;
+      if (header === '事件ID' || header === '標的股價') return oldValue(header);
+      if (header === '門檻') return alertThresholdLabel_(eventType);
+      if (header === '紀錄ID') return eventId
+        ? alertRecordId_(eventId, scanId, contractSymbol, 'NO_MATCH')
+        : `LEGACY|${rowIndex + 2}`;
+      if (['今日新增', '事件完整性', '失敗掃描'].includes(header)) return '';
+      return oldValue(header);
+    });
+  });
+  if (sheet.getMaxColumns() < APP.ALERT_HEADERS.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), APP.ALERT_HEADERS.length - sheet.getMaxColumns());
+  }
   if (migrated.length) sheet.getRange(2, 1, migrated.length, APP.ALERT_HEADERS.length).setValues(migrated);
+  sheet.getRange(1, 1, 1, APP.ALERT_HEADERS.length).setValues([APP.ALERT_HEADERS]);
+  if (headers.length > APP.ALERT_HEADERS.length) {
+    sheet.getRange(1, APP.ALERT_HEADERS.length + 1, Math.max(sheet.getLastRow(), 1),
+      headers.length - APP.ALERT_HEADERS.length).clearContent();
+  }
 }
 
 function migrateScanSchema050_(spreadsheet) {
@@ -715,6 +847,34 @@ function applyScanFormatting_() {
     SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($AF2,"不足|過期|限制|失敗|無資料")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
+}
+
+function applyAlertLogFormatting_() {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.ALERTS);
+  if (!sheet) return;
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(4);
+  sheet.getRange(1, 1, 1, APP.ALERT_HEADERS.length)
+    .setBackground('#E5E7EB')
+    .setFontWeight('bold')
+    .setFontColor('#111827')
+    .setWrap(true);
+  sheet.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('D:D').setNumberFormat('yyyy-mm-dd');
+  sheet.getRange('F:I').setNumberFormat('0.0000');
+  sheet.getRange('J:J').setNumberFormat('0.00%');
+  sheet.getRange('K:L').setNumberFormat('#,##0');
+  sheet.getRange('P:P').setNumberFormat('0.0000');
+  sheet.getRange('Q:Q').setNumberFormat('0.00%');
+  sheet.setColumnWidths(1, APP.ALERT_HEADERS.length, 110);
+  sheet.setColumnWidth(1, 155);
+  sheet.setColumnWidth(2, 180);
+  sheet.setColumnWidth(13, 210);
+  sheet.setColumnWidth(14, 220);
+  sheet.setColumnWidth(18, 260);
+  sheet.setColumnWidths(19, 4, 115);
+  sheet.setColumnWidth(23, 220);
+  sheet.setColumnWidth(24, 320);
 }
 
 function applyCloseTrendFormatting_() {

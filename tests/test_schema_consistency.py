@@ -2,7 +2,7 @@ import re
 import unittest
 from pathlib import Path
 
-from app.constants import CHAIN_HEADERS, CLOSE_ALERT_STATE_HEADERS, CLOSE_TREND_HEADERS, SCAN_HEADERS
+from app.constants import ALERT_LOG_HEADERS, CHAIN_HEADERS, CLOSE_ALERT_STATE_HEADERS, CLOSE_TREND_HEADERS, SCAN_HEADERS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +54,16 @@ class SchemaConsistencyTests(unittest.TestCase):
         self.assertIsNotNone(builder_block)
         self.assertEqual(quoted_values(apps_block.group(1)), CLOSE_ALERT_STATE_HEADERS)
         self.assertEqual(quoted_values(builder_block.group(1)), CLOSE_ALERT_STATE_HEADERS)
+
+    def test_alert_log_headers_match_python_apps_script_and_template(self):
+        code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8")
+        apps_block = re.search(r"ALERT_HEADERS:\s*\[(.*?)\]\s*,", code, re.S)
+        builder_block = re.search(r"const alertHeaders = \[(.*?)\];", builder, re.S)
+        self.assertIsNotNone(apps_block)
+        self.assertIsNotNone(builder_block)
+        self.assertEqual(quoted_values(apps_block.group(1)), ALERT_LOG_HEADERS)
+        self.assertEqual(quoted_values(builder_block.group(1)), ALERT_LOG_HEADERS)
 
     def test_apps_script_does_not_fill_empty_scan_rows_with_false(self):
         code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")

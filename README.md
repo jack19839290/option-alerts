@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.7.0`
+目前版本：`0.7.1`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算 Greeks 與賣出權利金年化報酬率，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 
@@ -31,9 +31,10 @@
 - 更新要求第一次失敗會立即寄信；持續失敗期間每 24 小時最多提醒一次，恢復時再通知一次。
 - 遇到 Yahoo 流量限制時採 15／30／60 分鐘退避，不繞過限制。
 - 通知改用逐筆狀態佇列，可查到待寄、寄送中、已寄與失敗重試；期權鍊採先寫入新版再清除舊尾列，降低中斷後整張空白的風險。
+- 「警示紀錄」會從通知佇列補登所有已寄出的第一與第二門檻合約；0 筆符合與資料不完整的收盤通知也會保留事件紀錄。
 - 部分成功不會冒充完整成功；收盤會逐掃描記錄完成狀態並重試失敗項目。市場行事曆無法確認時會明確停止自動警示。
 
-## 升級至 0.7.0
+## 升級至 0.7.1
 
 請依照 [UPGRADE_0.7.md](UPGRADE_0.7.md) 操作。執行 Apps Script 的 `setupSystem` 時：
 
@@ -51,7 +52,7 @@ infra/deploy.ps1     選用的 Google Cloud 部署腳本
 scripts/             Google Sheets 範本產生器
 tests/               定價、Greeks、條件、基準與更新流程測試
 GITHUB_ACTIONS.md     GitHub Actions 免費部署與授權步驟
-UPGRADE_0.7.md        0.7.0 升級與驗證說明
+UPGRADE_0.7.md        0.7.1 升級與驗證說明
 UPGRADE_0.5.md        0.5.1 舊版升級說明
 DEPLOYMENT.md         選用的 Cloud Run 部署步驟
 ```

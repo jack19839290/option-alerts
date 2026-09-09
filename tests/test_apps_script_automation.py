@@ -9,10 +9,13 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_7_0_everywhere(self):
-        self.assertIn("VERSION: '0.7.0'", CODE)
-        self.assertIn('version = "0.7.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.7.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+    def test_version_is_0_7_1_everywhere(self):
+        self.assertIn("VERSION: '0.7.1'", CODE)
+        self.assertIn('version = "0.7.1"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.7.1"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+        self.assertIn('["系統版本", "0.7.1", "目前規格版本"]',
+                      (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8"))
+        self.assertIn('目前版本：`0.7.1`', (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
         self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)
@@ -134,6 +137,26 @@ class AppsScriptAutomationTests(unittest.TestCase):
         self.assertIn("setValue('SENDING')", CODE)
         self.assertIn("setValue('SENT')", CODE)
         self.assertIn("重試次數", CODE)
+
+    def test_sent_queue_events_reconcile_every_alert_log_row(self):
+        self.assertIn("function reconcileSentAlertLogs_()", CODE)
+        self.assertIn("buildAlertLogRowsForEvent_", CODE)
+        self.assertIn("'已寄送（0筆符合）'", CODE)
+        self.assertIn("'第一門檻'", CODE)
+        self.assertIn("'第二門檻'", CODE)
+        self.assertIn("'今日新增'", CODE)
+        self.assertIn("'紀錄ID'", CODE)
+        processor = re.search(r"function processPendingEmails\(\) \{(.*?)\n\}", CODE, re.S)
+        self.assertIsNotNone(processor)
+        self.assertIn("reconcileSentAlertLogs_();", processor.group(1))
+
+    def test_scan_migration_removes_legacy_validation_before_writing(self):
+        migration = re.search(r"function migrateScanSchema070_\(spreadsheet\) \{(.*?)\n\}", CODE, re.S)
+        self.assertIsNotNone(migration)
+        block = migration.group(1)
+        self.assertIn("clearDataValidations();", block)
+        self.assertLess(block.index("clearDataValidations();"), block.index("setValues(migrated)"))
+        self.assertNotIn("rewriteRange.clearContent();", block)
 
     def test_dispatch_acceptance_is_separate_from_data_completion(self):
         self.assertIn("等待資料更新完成", CODE)
