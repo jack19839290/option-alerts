@@ -1,10 +1,9 @@
-import json
 import unittest
 from datetime import datetime, timezone
 
 from app.constants import SCAN_HEADERS, SETTINGS_DEFAULTS
 from app.models import ChainSnapshot, OptionQuote, ScanRecord
-from app.provider import RateLimitError
+from app.provider import MarketDataError, RateLimitError
 from app.service import RefreshService
 
 
@@ -18,6 +17,9 @@ class FakeRepository:
         self.scan_updates = None
         self.chain_updates = None
         self.close_trend_updates = []
+        self.notification_events = []
+        self.close_records = {}
+        self.previous_close = {}
         self.logs = []
 
     def load_settings(self):
@@ -37,6 +39,21 @@ class FakeRepository:
 
     def upsert_close_trend_rows(self, rows):
         self.close_trend_updates.extend(rows)
+
+    def append_notification_events(self, events):
+        self.notification_events.extend(events)
+
+    def load_close_records(self, market_date):
+        return dict(self.close_records.get(market_date, {}))
+
+    def load_previous_close_record(self, scan_id, market_date):
+        return self.previous_close.get(scan_id)
+
+    def upsert_close_records(self, records):
+        for record in records:
+            self.close_records.setdefault(record["market_date"], {})[record["scan_id"]] = {
+                "狀態": record["status"], "第一條件指紋": record["fingerprint"]
+            }
 
     def update_settings(self, updates):
         self.settings.update(updates)
@@ -103,40 +120,33 @@ class FallbackRateProvider(FakeProvider):
         return fallback
 
 
-def make_scan(*, baseline=False, fingerprint=""):
-    row = [
-        True,
-        "",
-        "MU",
-        "2027-01-15",
-        "ALL",
-        "",
-        "",
-        "",
-        "",
-        "≥",
-        0.15,
-        60,
-        100,
-        True,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        baseline,
-        fingerprint,
-    ]
+def make_scan(*, second=False, second_fingerprint="", ticker="MU"):
+    values = {"啟用": True, "股票代號": ticker, "到期日": "2027-01-15", "顯示類型": "ALL",
+              "第一門檻啟用": True, "第一年化報酬率條件": "≥", "第一年化報酬率門檻": 0.15,
+              "第一未平倉大於(口)": 100, "CALL持股成本": 60, "Email通知": True,
+              "第二門檻啟用": second, "第二年化報酬率條件": "≥" if second else "",
+              "第二年化報酬率門檻": 0.15 if second else "", "第二未平倉大於(口)": 100 if second else "",
+              "第二條件指紋": second_fingerprint}
+    row = [values.get(header, "") for header in SCAN_HEADERS]
     scan = ScanRecord.from_values(2, SCAN_HEADERS, row)
-    if baseline and not fingerprint:
-        scan.values["條件指紋"] = scan.condition_fingerprint
+    if second and not second_fingerprint:
+        scan.values["第二條件指紋"] = scan.second_condition_fingerprint
     return scan
+
+
+class PartialProvider(FakeProvider):
+    def fetch_chain(self, ticker, expiry):
+        if ticker == "BAD":
+            raise MarketDataError("Yahoo unavailable")
+        return super().fetch_chain(ticker, expiry)
+
+
+class NoMatchProvider(FakeProvider):
+    def fetch_chain(self, ticker, expiry):
+        snapshot = super().fetch_chain(ticker, expiry)
+        for quote in snapshot.quotes:
+            quote.open_interest = 0
+        return snapshot
 
 
 class ServiceTests(unittest.TestCase):
@@ -186,13 +196,12 @@ class ServiceTests(unittest.TestCase):
 
     def test_close_dispatch_is_written_only_once(self):
         scan = make_scan()
-        repository = FakeRepository(
-            [scan], {"最後成功抓取(UTC)": "2026-08-27T20:10:00+00:00"}
-        )
+        repository = FakeRepository([scan])
+        repository.close_records["2026-08-27"] = {scan.scan_id: {"狀態": "SUCCESS"}}
         now = datetime(2026, 8, 27, 20, 20, tzinfo=timezone.utc)
         result = RefreshService(repository, FakeProvider()).refresh(now=now)
         self.assertEqual(result["status"], "skipped")
-        self.assertEqual(result["reason"], "本交易日收盤更新已完成")
+        self.assertEqual(result["reason"], "本交易日收盤更新已完整完成")
 
     def test_first_scan_writes_full_chain_but_does_not_email(self):
         scan = make_scan()
@@ -204,15 +213,15 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "成功")
         self.assertEqual(len(rows), 2)
         self.assertEqual(update["合約數"], 2)
-        self.assertEqual(update["符合數"], 2)
-        self.assertEqual(update["待寄信"], "")
+        self.assertEqual(update["第一符合數"], 2)
+        self.assertEqual(update["第二符合數"], 0)
         put = next(row for row in rows if row["類型"] == "PUT")
         call = next(row for row in rows if row["類型"] == "CALL")
         self.assertAlmostEqual(put["年化報酬率"], 3.8 / 55 / put["DTE"] * 365)
         self.assertAlmostEqual(call["年化報酬率"], 6.8 / 60 / call["DTE"] * 365)
         self.assertAlmostEqual(put["Bid-Ask價差率"], 0.10)
         self.assertIsNotNone(put["Gamma估算"])
-        self.assertEqual(put["通知狀態"], "初次基準")
+        self.assertEqual(put["第二通知狀態"], "停用")
 
     def test_dividend_yield_warning_is_written_to_data_status(self):
         scan = make_scan()
@@ -240,41 +249,43 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("採用備援利率", rows[0]["資料狀態"])
         self.assertEqual(result["risk_free_rate_source"], "設定備援值")
 
-    def test_later_new_match_creates_aggregated_pending_payload(self):
-        scan = make_scan(baseline=True)
+    def test_second_threshold_new_match_creates_queue_event(self):
+        scan = make_scan(second=True)
         states = {
             scan.scan_id: {
                 "MU270115P00055000": {
-                    "可再次通知": True,
-                    "連續有效不符合": 2,
+                    "第二可再次通知": True,
+                    "第二連續有效不符合": 2,
+                    "第二通知序號": 1,
                 },
                 "MU270115C00055000": {
-                    "可再次通知": False,
-                    "連續有效不符合": 0,
+                    "第二可再次通知": False,
+                    "第二連續有效不符合": 0,
+                    "第二通知序號": 1,
                 },
             }
         }
         repository = FakeRepository([scan], chain_states=states)
         now = datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc)
         RefreshService(repository, FakeProvider()).refresh(force=True, now=now)
-        payload = json.loads(repository.scan_updates[scan.scan_id]["待寄信"])
-        self.assertEqual(payload["total"], 1)
-        self.assertEqual(payload["items"][0]["contract_symbol"], "MU270115P00055000")
+        self.assertEqual(len(repository.notification_events), 1)
+        payload = repository.notification_events[0]["內容JSON"]
+        self.assertEqual(payload["groups"][0]["items"][0]["contract_symbol"], "MU270115P00055000")
 
-    def test_condition_change_resets_baseline(self):
-        scan = make_scan(baseline=True, fingerprint="old-conditions")
+    def test_second_condition_change_notifies_current_matches(self):
+        scan = make_scan(second=True, second_fingerprint="old-conditions")
         states = {
             scan.scan_id: {
                 "MU270115P00055000": {
-                    "可再次通知": True,
-                    "連續有效不符合": 2,
+                    "第二可再次通知": False,
+                    "第二連續有效不符合": 0,
                 }
             }
         }
         repository = FakeRepository([scan], chain_states=states)
         now = datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc)
         RefreshService(repository, FakeProvider()).refresh(force=True, now=now)
-        self.assertEqual(repository.scan_updates[scan.scan_id]["待寄信"], "")
+        self.assertEqual(len(repository.notification_events), 1)
 
     def test_rate_limit_sets_backoff(self):
         scan = make_scan()
@@ -284,6 +295,40 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "rate_limited")
         self.assertEqual(repository.settings["連續失敗次數"], 1)
         self.assertIn("2026-08-27T15:15:00", repository.settings["下次允許抓取(UTC)"])
+
+    def test_close_zero_matches_still_queues_daily_email(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        now = datetime(2026, 8, 27, 20, 45, tzinfo=timezone.utc)
+        RefreshService(repository, NoMatchProvider()).refresh(now=now)
+        event = repository.notification_events[0]
+        self.assertEqual(event["事件類型"], "FIRST_CLOSE")
+        self.assertEqual(event["內容JSON"]["groups"][0]["items"], [])
+
+    def test_close_marks_new_contract_against_previous_valid_close(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        repository.previous_close[scan.scan_id] = {
+            "fingerprint": scan.first_condition_fingerprint,
+            "symbols": ["MU270115C00055000"],
+        }
+        now = datetime(2026, 8, 27, 20, 45, tzinfo=timezone.utc)
+        RefreshService(repository, FakeProvider()).refresh(now=now)
+        items = repository.notification_events[0]["內容JSON"]["groups"][0]["items"]
+        flags = {item["contract_symbol"]: item["is_new"] for item in items}
+        self.assertTrue(flags["MU270115P00055000"])
+        self.assertFalse(flags["MU270115C00055000"])
+
+    def test_partial_success_does_not_advance_last_complete_success(self):
+        good, bad = make_scan(), make_scan(ticker="BAD")
+        previous = "2026-08-26T20:10:00+00:00"
+        repository = FakeRepository([good, bad], {"最後成功抓取(UTC)": previous})
+        now = datetime(2026, 8, 27, 20, 45, tzinfo=timezone.utc)
+        result = RefreshService(repository, PartialProvider()).refresh(now=now)
+        self.assertEqual(result["status"], "部分成功")
+        self.assertEqual(repository.settings["最後成功抓取(UTC)"], previous)
+        self.assertEqual(repository.close_records["2026-08-27"][bad.scan_id]["狀態"], "FAILED")
+        self.assertFalse(repository.notification_events[0]["是否完整"])
 
 
 if __name__ == "__main__":

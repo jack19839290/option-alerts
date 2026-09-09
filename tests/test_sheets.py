@@ -22,7 +22,7 @@ class FakeValuesApi:
 
     def get(self, **kwargs):
         target = kwargs["range"]
-        if target.endswith("A1:AN1"):
+        if target.endswith("A1:AP1"):
             return FakeRequest({"values": [CLOSE_TREND_HEADERS]})
         if target.endswith("A2:J"):
             return FakeRequest({"values": self.existing_rows})
@@ -57,7 +57,7 @@ class FakeSpreadsheetsApi:
                         "properties": {
                             "sheetId": 123,
                             "title": "收盤Delta趨勢",
-                            "gridProperties": {"columnCount": 40},
+                            "gridProperties": {"columnCount": 42},
                         }
                     }
                 ]
@@ -147,6 +147,41 @@ class CloseTrendWriteTests(unittest.TestCase):
         self.assertEqual(len(values_api.batch_updates[0]["body"]["data"]), 1)
         self.assertEqual(len(values_api.appends), 1)
         self.assertEqual(len(values_api.appends[0]["body"]["values"]), 1)
+
+
+class CloseAlertStateWriteTests(unittest.TestCase):
+    def test_attempt_count_starts_at_one_and_increments_on_retry(self):
+        existing = [[
+            "2026-08-27|MU|2027-01-15", "2026-08-27", "MU|2027-01-15", "fingerprint",
+            "FAILED", "[]", "", "", "temporary failure", 3,
+        ]]
+        repository = make_repository(existing)
+        repository._ensure_sheets = lambda *args, **kwargs: None
+        repository._ensure_header = lambda *args, **kwargs: None
+        repository.upsert_close_records([
+            {
+                "record_id": "2026-08-27|MU|2027-01-15",
+                "market_date": "2026-08-27",
+                "scan_id": "MU|2027-01-15",
+                "fingerprint": "fingerprint",
+                "status": "SUCCESS",
+                "symbols": ["MU270115P00055000"],
+            },
+            {
+                "record_id": "2026-08-27|NVDA|2027-03-19",
+                "market_date": "2026-08-27",
+                "scan_id": "NVDA|2027-03-19",
+                "fingerprint": "another",
+                "status": "FAILED",
+                "symbols": [],
+            },
+        ])
+
+        values_api = repository.service.spreadsheets_api.values_api
+        updated_values = values_api.batch_updates[0]["body"]["data"][0]["values"][0]
+        appended_values = values_api.appends[0]["body"]["values"][0]
+        self.assertEqual(updated_values[-1], 4)
+        self.assertEqual(appended_values[-1], 1)
 
 
 if __name__ == "__main__":

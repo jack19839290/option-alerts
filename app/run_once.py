@@ -24,7 +24,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO)
     result = run()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0
+    return 0 if result.get("status") in {"成功", "skipped"} else 1
 
 
 if __name__ == "__main__":

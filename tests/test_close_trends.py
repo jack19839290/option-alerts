@@ -7,23 +7,9 @@ from app.models import ScanRecord
 
 
 def make_scan(display_type="ALL"):
-    row = [
-        True,
-        "",
-        "MU",
-        "2027-01-15",
-        display_type,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        60,
-        "",
-        True,
-        "",
-    ]
+    values = {"啟用": True, "股票代號": "MU", "到期日": "2027-01-15",
+              "顯示類型": display_type, "CALL持股成本": 60, "Email通知": True}
+    row = [values.get(header, "") for header in SCAN_HEADERS]
     return ScanRecord.from_values(2, SCAN_HEADERS, row)
 
 

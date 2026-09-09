@@ -16,19 +16,25 @@ const settings = workbook.worksheets.add("設定");
 const alertLog = workbook.worksheets.add("警示紀錄");
 const systemLog = workbook.worksheets.add("系統紀錄");
 const closeTrend = workbook.worksheets.add("收盤Delta趨勢");
+const queue = workbook.worksheets.add("通知佇列");
+const closeState = workbook.worksheets.add("收盤門檻紀錄");
+const sampleChain = workbook.worksheets.add("MU_2027-01-15");
 
 const scanHeaders = [
-  "啟用", "掃描ID", "股票代號", "到期日", "顯示類型", "Delta條件", "Delta門檻",
-  "Bid-Ask價差條件", "Bid-Ask價差門檻", "年化報酬率條件", "年化報酬率門檻", "CALL持股成本",
-  "未平倉大於(口)", "Email通知", "備註", "狀態", "標的股價", "合約數", "符合數",
-  "最後抓取時間", "資料狀態", "待寄信", "最後通知時間", "錯誤訊息", "工作表",
-  "已建立基準", "條件指紋",
+  "啟用", "掃描ID", "股票代號", "到期日", "顯示類型",
+  "第一門檻啟用", "第一Delta條件", "第一Delta門檻", "第一Bid-Ask價差條件", "第一Bid-Ask價差門檻",
+  "第一年化報酬率條件", "第一年化報酬率門檻", "第一未平倉大於(口)",
+  "第二門檻啟用", "第二Delta條件", "第二Delta門檻", "第二Bid-Ask價差條件", "第二Bid-Ask價差門檻",
+  "第二年化報酬率條件", "第二年化報酬率門檻", "第二未平倉大於(口)",
+  "CALL持股成本", "Email通知", "備註", "狀態", "標的股價", "合約數", "第一符合數", "第二符合數",
+  "最後嘗試時間", "最後成功抓取時間", "資料狀態", "錯誤訊息", "工作表", "第一條件指紋",
+  "第二條件指紋", "收盤狀態", "收盤最後成功交易日",
 ];
 
 const alertHeaders = [
   "寄送時間", "掃描ID", "股票代號", "到期日", "類型", "履約價", "Bid", "Delta估算",
-  "Vega估算(每1%)", "年化報酬率", "未平倉", "DTE", "合約代號", "收件信箱", "寄送狀態",
-  "Ask", "Bid-Ask價差率", "Gamma估算", "Theta估算(每日)",
+  "標的股價", "年化報酬率", "未平倉", "DTE", "合約代號", "收件信箱", "寄送狀態",
+  "Ask", "Bid-Ask價差率", "事件ID", "事件類型",
 ];
 
 const closeTrendHeaders = [
@@ -38,6 +44,18 @@ const closeTrendHeaders = [
   "試算價來源", "年化本金", "DTE", "到期權利金報酬率", "年化報酬率", "IV", "Gamma估算",
   "Theta估算(每日)", "Vega估算(每1%)", "成交量", "未平倉", "最後成交時間", "無風險利率",
   "無風險利率來源", "股息殖利率", "Greeks模型", "資料狀態", "備註／未選取原因",
+  "標的－履約價差", "標的－履約價差率",
+];
+
+const chainHeaders = [
+  "符合門檻", "第一門檻結果", "第二門檻結果", "類型", "履約價", "標的股價", "Bid",
+  "年化報酬率", "第一年化報酬率結果", "第二年化報酬率結果", "Delta估算", "第一Delta結果",
+  "第二Delta結果", "Bid-Ask價差率", "第一Bid-Ask價差結果", "第二Bid-Ask價差結果",
+  "未平倉", "第一未平倉結果", "第二未平倉結果", "DTE", "最後抓取時間", "Ask", "Mid",
+  "Last", "成交量", "標的－履約價差", "最後成交時間", "Gamma估算", "Theta估算(每日)",
+  "Vega估算(每1%)", "IV", "年化本金", "賣出試算價", "試算價來源", "無風險利率",
+  "股息殖利率", "Greeks模型", "|Delta|", "合約代號", "掃描ID", "第二通知狀態",
+  "第二可再次通知", "第二連續有效不符合", "第二通知序號", "資料狀態",
 ];
 
 // 控制台
@@ -61,8 +79,8 @@ dashboard.getRange("A4:H4").format = {
   borders: { preset: "outside", style: "thin", color: "#CBD5E1" },
 };
 dashboard.getRange("B5").formulas = [["=COUNTIF('掃描設定'!$A$2:$A$1000,TRUE)"]];
-dashboard.getRange("D5").formulas = [["=SUM('掃描設定'!$S$2:$S$1000)"]];
-dashboard.getRange("F5").formulas = [["=COUNTIF('掃描設定'!$U$2:$U$1000,\"*不足*\")+COUNTIF('掃描設定'!$U$2:$U$1000,\"*失敗*\")+COUNTIF('掃描設定'!$U$2:$U$1000,\"*限制*\")"]];
+dashboard.getRange("D5").formulas = [["=SUM('掃描設定'!$AB$2:$AB$1000)+SUM('掃描設定'!$AC$2:$AC$1000)"]];
+dashboard.getRange("F5").formulas = [["=COUNTIF('掃描設定'!$AF$2:$AF$1000,\"*不足*\")+COUNTIF('掃描設定'!$AF$2:$AF$1000,\"*失敗*\")+COUNTIF('掃描設定'!$AF$2:$AF$1000,\"*限制*\")"]];
 dashboard.getRange("H5").formulas = [["='設定'!$B$17"]];
 dashboard.getRange("A5:H5").format = {
   fill: "#FFFFFF",
@@ -85,7 +103,7 @@ dashboard.getRange("B8").formulas = [["='設定'!$B$18"]];
 dashboard.getRange("B9").formulas = [["='設定'!$B$15"]];
 dashboard.getRange("B10").formulas = [["='設定'!$B$14"]];
 dashboard.getRange("A7:A10").format = { fill: "#F8FAFC", font: { bold: true } };
-dashboard.getRange("B7:B10").format = { font: { color: "#008000" } };
+dashboard.getRange("B7:B10").format = { font: { color: "#475569" } };
 dashboard.getRange("A7:B10").format.borders = { preset: "outside", style: "thin", color: "#CBD5E1" };
 
 dashboard.getRange("F7:H10").values = [
@@ -100,7 +118,7 @@ dashboard.getRange("H10").formulas = [["='設定'!$B$23"]];
 dashboard.getRange("F7:F10").format = { fill: "#F8FAFC", font: { bold: true } };
 dashboard.getRange("G7:G10").format = { font: { color: "#475569", size: 9 }, wrapText: true };
 dashboard.getRange("H7").format = { fill: "#DBEAFE", horizontalAlignment: "center" };
-dashboard.getRange("H8:H10").format = { font: { color: "#008000" }, wrapText: true };
+dashboard.getRange("H8:H10").format = { font: { color: "#475569" }, wrapText: true };
 dashboard.getRange("H7").dataValidation = { rule: { type: "list", values: ["TRUE", "FALSE"] } };
 
 dashboard.getRange("A12:H12").merge();
@@ -112,7 +130,7 @@ dashboard.getRange("A13:A18").values = [
   ["2. 在「設定」填入固定通知信箱，再從選單設定 90 天 GitHub 金鑰。"],
   ["3. 透過表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。"],
   ["4. 開盤、盤中整點與收盤自動更新；正式收盤會保存 Delta 0.10／0.15／0.20 趨勢。"],
-  ["5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。"],
+  ["5. 第一門檻每天收盤彙總全部符合項目；第二門檻首次符合時即時通知。"],
   ["6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。"],
 ];
 dashboard.getRange("A13:H18").format = { wrapText: true, rowHeight: 27, verticalAlignment: "center" };
@@ -142,7 +160,7 @@ dashboard.getRange("A:A").format.columnWidthPx = 150;
 dashboard.getRange("B:B").format.columnWidthPx = 210;
 
 // 掃描設定：普通儲存格加驗證，不建立原生表格，避免指定類型欄限制 Apps Script。
-scans.getRange("A1:AA1").values = [scanHeaders];
+scans.getRange("A1:AL1").values = [scanHeaders];
 const sampleRow = Array(scanHeaders.length).fill("");
 Object.assign(sampleRow, {
   0: false,
@@ -150,49 +168,39 @@ Object.assign(sampleRow, {
   2: "MU",
   3: new Date("2027-01-15T12:00:00Z"),
   4: "ALL",
-  5: "≥",
-  6: 0.2,
-  7: "≤",
-  8: 0.10,
-  9: "≥",
-  10: 0.15,
-  11: 60,
-  12: 100,
-  13: true,
-  14: "停用範例；20% 年化門檻在儲存格中是 0.20",
-  15: "範例（停用）",
-  20: "尚未抓取",
-  24: "MU_2027-01-15",
-  25: false,
+  5: true, 6: "≥", 7: 0.2, 8: "≤", 9: 0.10, 10: "≥", 11: 0.15, 12: 100,
+  13: false, 21: 60, 22: true, 23: "停用範例；第一門檻為舊條件遷移位置",
+  24: "範例（停用）", 31: "尚未抓取", 33: "MU_2027-01-15",
 });
-scans.getRange("A2:AA2").values = [sampleRow];
-scans.getRange("A1:AA1").format = {
+scans.getRange("A2:AL2").values = [sampleRow];
+scans.getRange("A1:AL1").format = {
   fill: "#E5E7EB",
   font: { bold: true, color: "#111827" },
   rowHeight: 34,
   wrapText: true,
   verticalAlignment: "center",
 };
-scans.getRange("A2:O1000").format.font = { color: "#0000FF" };
+scans.getRange("A2:X1000").format.font = { color: "#0000FF" };
 scans.getRange("D2:D1000").format.numberFormat = "yyyy-mm-dd";
-scans.getRange("G2:G1000").format.numberFormat = "0.0000";
-scans.getRange("I2:I1000").format.numberFormat = "0.00%";
-scans.getRange("K2:K1000").format.numberFormat = "0.00%";
-scans.getRange("L2:L1000").format.numberFormat = "0.0000";
+scans.getRange("H2:H1000").format.numberFormat = "0.0000";
+scans.getRange("J2:L1000").format.numberFormat = "0.00%";
 scans.getRange("M2:M1000").format.numberFormat = "#,##0";
-scans.getRange("Q2:Q1000").format.numberFormat = "0.0000";
-scans.getRange("R2:S1000").format.numberFormat = "#,##0";
-scans.getRange("T2:T1000").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
-scans.getRange("W2:W1000").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
+scans.getRange("P2:P1000").format.numberFormat = "0.0000";
+scans.getRange("R2:T1000").format.numberFormat = "0.00%";
+scans.getRange("U2:U1000").format.numberFormat = "#,##0";
+scans.getRange("V2:V1000").format.numberFormat = "0.0000";
+scans.getRange("Z2:Z1000").format.numberFormat = "0.0000";
+scans.getRange("AA2:AC1000").format.numberFormat = "#,##0";
+scans.getRange("AD2:AE1000").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
 scans.getRange("A2:A1000").dataValidation = { rule: { type: "list", values: ["TRUE", "FALSE"] } };
-scans.getRange("N2:N1000").dataValidation = { rule: { type: "list", values: ["TRUE", "FALSE"] } };
+for (const column of ["F", "N", "W"]) scans.getRange(`${column}2:${column}1000`).dataValidation = { rule: { type: "list", values: ["TRUE", "FALSE"] } };
 scans.getRange("E2:E1000").dataValidation = { rule: { type: "list", values: ["ALL", "CALL", "PUT"] } };
-for (const column of ["F", "H", "J"]) {
+for (const column of ["G", "I", "K", "O", "Q", "S"]) {
   scans.getRange(`${column}2:${column}1000`).dataValidation = { rule: { type: "list", values: ["≥", "≤"] } };
 }
-scans.getRange("A2:AA1000").conditionalFormats.addCustom('=$A2=FALSE', { fill: "#F3F4F6", font: { color: "#6B7280" } });
-scans.getRange("A2:AA1000").conditionalFormats.addCustom('=$S2>0', { fill: "#DCFCE7", font: { color: "#166534", bold: true } });
-scans.getRange("A2:AA1000").conditionalFormats.addCustom('=OR(ISNUMBER(SEARCH("不足",$U2)),ISNUMBER(SEARCH("失敗",$U2)),ISNUMBER(SEARCH("限制",$U2)))', { fill: "#FEF3C7", font: { color: "#92400E" } });
+scans.getRange("A2:AL1000").conditionalFormats.addCustom('=$A2=FALSE', { fill: "#F3F4F6", font: { color: "#6B7280" } });
+scans.getRange("A2:AL1000").conditionalFormats.addCustom('=OR($AB2>0,$AC2>0)', { fill: "#DCFCE7", font: { color: "#166534", bold: true } });
+scans.getRange("A2:AL1000").conditionalFormats.addCustom('=REGEXMATCH($AF2,"不足|失敗|限制")', { fill: "#FEF3C7", font: { color: "#92400E" } });
 scans.freezePanes.freezeRows(1);
 scans.freezePanes.freezeColumns(5);
 scans.getRange("A:A").format.columnWidthPx = 65;
@@ -200,16 +208,14 @@ scans.getRange("B:B").format.columnWidthPx = 185;
 scans.getRange("C:C").format.columnWidthPx = 80;
 scans.getRange("D:D").format.columnWidthPx = 105;
 scans.getRange("E:E").format.columnWidthPx = 95;
-scans.getRange("F:M").format.columnWidthPx = 110;
-scans.getRange("N:N").format.columnWidthPx = 95;
-scans.getRange("O:O").format.columnWidthPx = 260;
-scans.getRange("P:AA").format.columnWidthPx = 115;
-scans.getRange("V:V").format.columnWidthPx = 260;
+scans.getRange("F:W").format.columnWidthPx = 110;
 scans.getRange("X:X").format.columnWidthPx = 260;
+scans.getRange("Y:AL").format.columnWidthPx = 115;
+scans.getRange("AG:AG").format.columnWidthPx = 260;
 
 // 收盤 Delta 趨勢：長表格，每個交易日／掃描／類型／目標 Delta 一列。
-closeTrend.getRange("A1:AN1").values = [closeTrendHeaders];
-closeTrend.getRange("A1:AN1").format = {
+closeTrend.getRange("A1:AP1").values = [closeTrendHeaders];
+closeTrend.getRange("A1:AP1").format = {
   fill: "#E5E7EB",
   font: { bold: true, color: "#111827" },
   rowHeight: 42,
@@ -218,7 +224,7 @@ closeTrend.getRange("A1:AN1").format = {
 };
 closeTrend.freezePanes.freezeRows(1);
 closeTrend.freezePanes.freezeColumns(10);
-closeTrend.getRange("A:AN").format.columnWidthPx = 110;
+closeTrend.getRange("A:AP").format.columnWidthPx = 110;
 closeTrend.getRange("A:A").format.columnWidthPx = 300;
 closeTrend.getRange("E:E").format.columnWidthPx = 180;
 closeTrend.getRange("K:K").format.columnWidthPx = 210;
@@ -241,18 +247,39 @@ closeTrend.getRange("AF:AG").format.numberFormat = "#,##0";
 closeTrend.getRange("AH:AH").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
 closeTrend.getRange("AI:AI").format.numberFormat = "0.00%";
 closeTrend.getRange("AK:AK").format.numberFormat = "0.00%";
-closeTrend.getRange("A2:AN1000").conditionalFormats.addCustom(
+closeTrend.getRange("AO:AO").format.numberFormat = "0.0000";
+closeTrend.getRange("AP:AP").format.numberFormat = "0.00%";
+closeTrend.getRange("A2:AP1000").conditionalFormats.addCustom(
   '=AND($J2="已選取",$AM2="正常")',
   { fill: "#DCFCE7", font: { color: "#166534" } },
 );
-closeTrend.getRange("A2:AN1000").conditionalFormats.addCustom(
+closeTrend.getRange("A2:AP1000").conditionalFormats.addCustom(
   '=REGEXMATCH($J2&$AM2,"不足|無效|無符合|無資料|未執行")',
   { fill: "#FEF3C7", font: { color: "#92400E" } },
 );
-closeTrend.getRange("A2:AN1000").conditionalFormats.addCustom(
+closeTrend.getRange("A2:AP1000").conditionalFormats.addCustom(
   '=REGEXMATCH($J2&$AM2,"失敗|流量限制")',
   { fill: "#FEE2E2", font: { color: "#991B1B" } },
 );
+
+// 期權鍊示意：把判斷結果放在數值旁，常用欄位集中於 A:U。
+sampleChain.getRange("A1:AS1").values = [chainHeaders];
+const makeChainRow = values => chainHeaders.map(header => values[header] ?? "");
+sampleChain.getRange("A2:AS4").values = [
+  makeChainRow({"符合門檻":"第一＋第二","第一門檻結果":"符合","第二門檻結果":"符合","類型":"PUT","履約價":55,"標的股價":60,"Bid":3.8,"年化報酬率":0.18,"第一年化報酬率結果":"通過","第二年化報酬率結果":"通過","Delta估算":-0.25,"第一Delta結果":"通過","第二Delta結果":"通過","Bid-Ask價差率":0.10,"第一Bid-Ask價差結果":"通過","第二Bid-Ask價差結果":"通過","未平倉":350,"第一未平倉結果":"通過","第二未平倉結果":"通過","DTE":100,"資料狀態":"正常"}),
+  makeChainRow({"符合門檻":"第一門檻","第一門檻結果":"符合","第二門檻結果":"未符合","類型":"PUT","履約價":50,"標的股價":60,"Bid":2.1,"年化報酬率":0.153,"第一年化報酬率結果":"通過","第二年化報酬率結果":"未通過","Delta估算":-0.18,"第一Delta結果":"通過","第二Delta結果":"未通過","Bid-Ask價差率":0.08,"第一Bid-Ask價差結果":"通過","第二Bid-Ask價差結果":"通過","未平倉":210,"第一未平倉結果":"通過","第二未平倉結果":"通過","DTE":100,"資料狀態":"正常"}),
+  makeChainRow({"符合門檻":"未符合","第一門檻結果":"未符合","第二門檻結果":"未符合","類型":"CALL","履約價":65,"標的股價":60,"Bid":1.2,"年化報酬率":0.073,"第一年化報酬率結果":"未通過","第二年化報酬率結果":"未通過","Delta估算":0.20,"第一Delta結果":"通過","第二Delta結果":"通過","Bid-Ask價差率":0.25,"第一Bid-Ask價差結果":"未通過","第二Bid-Ask價差結果":"未通過","未平倉":80,"第一未平倉結果":"未通過","第二未平倉結果":"未通過","DTE":100,"資料狀態":"正常"}),
+];
+sampleChain.getRange("A1:AS1").format = {fill:"#E5E7EB",font:{bold:true},wrapText:true,rowHeight:42};
+sampleChain.getRange("A2:AS2").format = {fill:"#D1FAE5",font:{color:"#065F46",bold:true}};
+sampleChain.getRange("A3:AS3").format = {fill:"#DCFCE7",font:{color:"#166534"}};
+sampleChain.freezePanes.freezeRows(1); sampleChain.freezePanes.freezeColumns(5);
+sampleChain.getRange("A:AS").format.columnWidthPx = 105;
+sampleChain.getRange("E:G").format.numberFormat = "0.0000";
+sampleChain.getRange("H:H").format.numberFormat = "0.00%";
+sampleChain.getRange("K:K").format.numberFormat = "0.0000";
+sampleChain.getRange("N:N").format.numberFormat = "0.00%";
+sampleChain.getRange("Q:Q").format.numberFormat = "#,##0";
 
 // 設定
 const settingsRows = [
@@ -269,7 +296,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.6.2", "目前規格版本"],
+  ["系統版本", "0.7.0", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
@@ -313,6 +340,11 @@ systemLog.getRange("C:C").format.columnWidthPx = 180;
 systemLog.getRange("D:D").format = { columnWidthPx: 520, wrapText: true };
 systemLog.freezePanes.freezeRows(1);
 
+queue.getRange("A1:O1").values = [["事件ID", "事件類型", "狀態", "建立時間(UTC)", "寄送時間", "重試次數", "下次重試時間", "掃描ID", "股票代號", "到期日", "美東交易日", "是否完整", "失敗掃描", "內容JSON", "最後錯誤"]];
+queue.getRange("A1:O1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
+closeState.getRange("A1:J1").values = [["記錄ID", "美東交易日", "掃描ID", "第一條件指紋", "狀態", "符合合約JSON", "最後嘗試時間(UTC)", "成功時間(UTC)", "錯誤訊息", "嘗試次數"]];
+closeState.getRange("A1:J1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
+
 const formulaScan = await workbook.inspect({
   kind: "match",
   searchTerm: "#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A",
@@ -327,17 +359,18 @@ const previewRanges = {
   "設定": "A1:C19",
   "警示紀錄": "A1:S5",
   "系統紀錄": "A1:D5",
-  "收盤Delta趨勢": "A1:AN5",
+  "收盤Delta趨勢": "A1:AP5",
+  "MU_2027-01-15": "A1:U5",
 };
 for (const [sheetName, range] of Object.entries(previewRanges)) {
   const preview = await workbook.render({ sheetName, range, scale: 1.4, format: "png" });
   await fs.writeFile(`${outputDir}/${sheetName}.png`, new Uint8Array(await preview.arrayBuffer()));
 }
-for (const [suffix, range] of [["前段", "A1:T5"], ["後段", "U1:AN5"]]) {
+for (const [suffix, range] of [["前段", "A1:T5"], ["後段", "U1:AP5"]]) {
   const preview = await workbook.render({ sheetName: "收盤Delta趨勢", range, scale: 1.4, format: "png" });
   await fs.writeFile(`${outputDir}/收盤Delta趨勢_${suffix}.png`, new Uint8Array(await preview.arrayBuffer()));
 }
-const scanOutputPreview = await workbook.render({ sheetName: "掃描設定", range: "P1:AA5", scale: 1.4, format: "png" });
+const scanOutputPreview = await workbook.render({ sheetName: "掃描設定", range: "Y1:AL5", scale: 1.4, format: "png" });
 await fs.writeFile(`${outputDir}/掃描設定_系統欄.png`, new Uint8Array(await scanOutputPreview.arrayBuffer()));
 
 const dashboardCheck = await workbook.inspect({
@@ -350,7 +383,7 @@ const dashboardCheck = await workbook.inspect({
 console.log(dashboardCheck.ndjson);
 const scanCheck = await workbook.inspect({
   kind: "table",
-  range: "掃描設定!A1:AA2",
+  range: "掃描設定!A1:AL2",
   include: "values,formulas",
   tableMaxRows: 3,
   tableMaxCols: 30,
@@ -358,7 +391,7 @@ const scanCheck = await workbook.inspect({
 console.log(scanCheck.ndjson);
 const trendCheck = await workbook.inspect({
   kind: "table",
-  range: "收盤Delta趨勢!A1:AN3",
+  range: "收盤Delta趨勢!A1:AP3",
   include: "values,formulas",
   tableMaxRows: 4,
   tableMaxCols: 42,

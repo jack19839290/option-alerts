@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.6.2',
+  VERSION: '0.7.0',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -7,6 +7,8 @@ const APP = Object.freeze({
     ALERTS: '警示紀錄',
     SYSTEM: '系統紀錄',
     CLOSE_TRENDS: '收盤Delta趨勢',
+    QUEUE: '通知佇列',
+    CLOSE_STATE: '收盤門檻紀錄',
   },
   GITHUB: {
     OWNER: 'jack19839290',
@@ -28,24 +30,29 @@ const APP = Object.freeze({
     LAST_EXPIRY_NOTICE_DATE: 'GITHUB_LAST_EXPIRY_NOTICE_DATE',
   },
   SCAN_HEADERS: [
-    '啟用', '掃描ID', '股票代號', '到期日', '顯示類型', 'Delta條件', 'Delta門檻',
-    'Bid-Ask價差條件', 'Bid-Ask價差門檻', '年化報酬率條件', '年化報酬率門檻', 'CALL持股成本',
-    '未平倉大於(口)', 'Email通知', '備註', '狀態', '標的股價', '合約數', '符合數',
-    '最後抓取時間', '資料狀態', '待寄信', '最後通知時間', '錯誤訊息', '工作表',
-    '已建立基準', '條件指紋'
+    '啟用', '掃描ID', '股票代號', '到期日', '顯示類型',
+    '第一門檻啟用', '第一Delta條件', '第一Delta門檻', '第一Bid-Ask價差條件',
+    '第一Bid-Ask價差門檻', '第一年化報酬率條件', '第一年化報酬率門檻', '第一未平倉大於(口)',
+    '第二門檻啟用', '第二Delta條件', '第二Delta門檻', '第二Bid-Ask價差條件',
+    '第二Bid-Ask價差門檻', '第二年化報酬率條件', '第二年化報酬率門檻', '第二未平倉大於(口)',
+    'CALL持股成本', 'Email通知', '備註', '狀態', '標的股價', '合約數', '第一符合數',
+    '第二符合數', '最後嘗試時間', '最後成功抓取時間', '資料狀態', '錯誤訊息', '工作表',
+    '第一條件指紋', '第二條件指紋', '收盤狀態', '收盤最後成功交易日'
   ],
   CHAIN_HEADERS: [
-    '掃描ID', '類型', '履約價', '合約代號', '標的股價', 'Last', 'Bid', 'Ask', 'Mid',
-    'Bid-Ask價差率', '賣出試算價', '試算價來源', 'IV', '無風險利率', '股息殖利率', 'Greeks模型',
-    'Delta估算', 'Gamma估算', 'Theta估算(每日)', 'Vega估算(每1%)', '|Delta|', 'DTE', '年化報酬率',
-    '年化本金', '成交量', '未平倉', 'Delta條件結果', 'Bid-Ask價差條件結果',
-    '年化報酬率條件結果', '未平倉條件結果', '全部條件符合', '通知狀態',
-    '可再次通知', '連續有效不符合', '待寄信', '最後成交時間', '最後抓取時間', '資料狀態'
+    '符合門檻', '第一門檻結果', '第二門檻結果', '類型', '履約價', '標的股價', 'Bid',
+    '年化報酬率', '第一年化報酬率結果', '第二年化報酬率結果', 'Delta估算', '第一Delta結果',
+    '第二Delta結果', 'Bid-Ask價差率', '第一Bid-Ask價差結果', '第二Bid-Ask價差結果',
+    '未平倉', '第一未平倉結果', '第二未平倉結果', 'DTE', '最後抓取時間', 'Ask', 'Mid',
+    'Last', '成交量', '標的－履約價差', '最後成交時間', 'Gamma估算', 'Theta估算(每日)',
+    'Vega估算(每1%)', 'IV', '年化本金', '賣出試算價', '試算價來源', '無風險利率',
+    '股息殖利率', 'Greeks模型', '|Delta|', '合約代號', '掃描ID', '第二通知狀態',
+    '第二可再次通知', '第二連續有效不符合', '第二通知序號', '資料狀態'
   ],
   ALERT_HEADERS: [
     '寄送時間', '掃描ID', '股票代號', '到期日', '類型', '履約價', 'Bid', 'Delta估算',
-    'Vega估算(每1%)', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態',
-    'Ask', 'Bid-Ask價差率', 'Gamma估算', 'Theta估算(每日)'
+    '標的股價', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態',
+    'Ask', 'Bid-Ask價差率', '事件ID', '事件類型'
   ],
   CLOSE_TREND_HEADERS: [
     '快照ID', '美東交易日', '官方收盤時間(UTC)', '實際抓取時間(UTC)', '掃描ID', '股票代號',
@@ -53,8 +60,14 @@ const APP = Object.freeze({
     'Delta差距', '標的快照價', 'Last', 'Bid', 'Ask', 'Mid', 'Bid-Ask價差率', '賣出試算價',
     '試算價來源', '年化本金', 'DTE', '到期權利金報酬率', '年化報酬率', 'IV', 'Gamma估算',
     'Theta估算(每日)', 'Vega估算(每1%)', '成交量', '未平倉', '最後成交時間', '無風險利率',
-    '無風險利率來源', '股息殖利率', 'Greeks模型', '資料狀態', '備註／未選取原因'
+    '無風險利率來源', '股息殖利率', 'Greeks模型', '資料狀態', '備註／未選取原因',
+    '標的－履約價差', '標的－履約價差率'
   ],
+  QUEUE_HEADERS: ['事件ID', '事件類型', '狀態', '建立時間(UTC)', '寄送時間', '重試次數',
+    '下次重試時間', '掃描ID', '股票代號', '到期日', '美東交易日', '是否完整', '失敗掃描',
+    '內容JSON', '最後錯誤'],
+  CLOSE_STATE_HEADERS: ['記錄ID', '美東交易日', '掃描ID', '第一條件指紋', '狀態', '符合合約JSON',
+    '最後嘗試時間(UTC)', '成功時間(UTC)', '錯誤訊息', '嘗試次數'],
 });
 
 function onOpen() {
@@ -115,21 +128,14 @@ function submitScan(payload) {
     }
 
     const inputValues = [[
-      true,
-      input.scanId,
-      input.ticker,
-      input.expiry,
-      input.displayType,
-      input.deltaOperator,
-      input.deltaThreshold === null ? '' : input.deltaThreshold,
-      input.spreadOperator,
-      input.spreadThreshold === null ? '' : input.spreadThreshold,
-      input.annualReturnOperator,
-      input.annualReturnThreshold === null ? '' : input.annualReturnThreshold,
-      input.callCostBasis === null ? '' : input.callCostBasis,
-      input.openInterestMin === null ? '' : input.openInterestMin,
-      input.emailEnabled,
-      input.note,
+      true, input.scanId, input.ticker, input.expiry, input.displayType,
+      input.first.enabled, input.first.deltaOperator, input.first.deltaThreshold ?? '',
+      input.first.spreadOperator, input.first.spreadThreshold ?? '',
+      input.first.annualReturnOperator, input.first.annualReturnThreshold ?? '', input.first.openInterestMin ?? '',
+      input.second.enabled, input.second.deltaOperator, input.second.deltaThreshold ?? '',
+      input.second.spreadOperator, input.second.spreadThreshold ?? '',
+      input.second.annualReturnOperator, input.second.annualReturnThreshold ?? '', input.second.openInterestMin ?? '',
+      input.callCostBasis ?? '', input.emailEnabled, input.note,
     ]];
 
     const isNew = rowNumber === -1;
@@ -141,10 +147,10 @@ function submitScan(payload) {
     }
     sheet.getRange(rowNumber, 1, 1, APP.SCAN_HEADERS.length).clearContent();
     sheet.getRange(rowNumber, 1, 1, inputValues[0].length).setValues(inputValues);
-    sheet.getRange(rowNumber, 16).setValue('待抓取');
-    sheet.getRange(rowNumber, 21).setValue('等待雲端更新');
-    sheet.getRange(rowNumber, 25).setValue(input.sheetName);
-    sheet.getRange(rowNumber, 26).setValue(false);
+    const output = Object.fromEntries(APP.SCAN_HEADERS.map((header, index) => [header, index + 1]));
+    sheet.getRange(rowNumber, output['狀態']).setValue('待抓取');
+    sheet.getRange(rowNumber, output['資料狀態']).setValue('等待雲端更新');
+    sheet.getRange(rowNumber, output['工作表']).setValue(input.sheetName);
     applyScanFormatting_();
     ensureChainSheet_(input.sheetName);
     prepareNextRefresh_();
@@ -154,8 +160,8 @@ function submitScan(payload) {
       scanId: input.scanId,
       sheetName: input.sheetName,
       message: isNew
-        ? '掃描已新增；第一次抓取只建立基準、不寄信。可按「立即手動更新」或等待下一個開盤更新時點。'
-        : '掃描設定已更新；下一次抓取會重新建立基準。可按「立即手動更新」或等待下一個開盤更新時點。',
+        ? '掃描已新增；第二門檻首次符合會即時通知，第一門檻於正式收盤彙總。'
+        : '掃描設定已更新；條件變更會在下一次更新套用。',
     };
   } finally {
     lock.releaseLock();
@@ -188,7 +194,7 @@ function setupSystem() {
   applyAllChainFormatting_();
   applyCloseTrendFormatting_();
   refreshGitHubStatusSettings_();
-  spreadsheet.toast(`系統已初始化／升級至 0.6.2；工作表時間使用 ${displayTimezone}`, '選擇權警示', 7);
+  spreadsheet.toast(`系統已初始化／升級至 ${APP.VERSION}；工作表時間使用 ${displayTimezone}`, '選擇權警示', 7);
 }
 
 function prepareNextRefresh_() {
@@ -212,67 +218,42 @@ function processPendingEmails() {
     if (!recipient) return;
 
     const spreadsheet = getSpreadsheet_();
-    const sheet = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
-    const values = sheet.getDataRange().getValues();
-    if (values.length < 2) return;
-    const headerMap = Object.fromEntries(values[0].map((header, index) => [header, index]));
-    const alertLog = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
-
+    const queue = spreadsheet.getSheetByName(APP.SHEETS.QUEUE);
+    if (!queue || queue.getLastRow() < 2) return;
+    const values = queue.getDataRange().getValues();
+    const map = Object.fromEntries(values[0].map((header, index) => [header, index]));
+    const now = new Date();
     for (let index = 1; index < values.length; index += 1) {
       const row = values[index];
-      const pendingText = String(row[headerMap['待寄信']] || '').trim();
-      const enabled = row[headerMap['Email通知']] === true;
-      const scanEnabled = row[headerMap['啟用']] === true;
-      if (!pendingText || !enabled || !scanEnabled) continue;
-
-      let payload;
+      const currentStatus = String(row[map['狀態']] || '');
+      if (currentStatus === 'SENDING') {
+        const claimedAt = row[map['寄送時間']];
+        if (claimedAt instanceof Date && now.getTime() - claimedAt.getTime() < 15 * 60 * 1000) continue;
+      } else if (!['PENDING', 'FAILED'].includes(currentStatus)) continue;
+      const nextRetry = row[map['下次重試時間']];
+      if (nextRetry instanceof Date && nextRetry > now) continue;
+      const rowNumber = index + 1;
+      queue.getRange(rowNumber, map['狀態'] + 1).setValue('SENDING');
+      queue.getRange(rowNumber, map['寄送時間'] + 1).setValue(now);
+      SpreadsheetApp.flush();
       try {
-        payload = JSON.parse(pendingText);
+        const payload = JSON.parse(String(row[map['內容JSON']] || '{}'));
+        const eventType = String(row[map['事件類型']] || '');
+        const message = buildQueueEmail_(eventType, payload, spreadsheet.getUrl());
+        MailApp.sendEmail({to: recipient, subject: message.subject, body: message.body,
+          htmlBody: message.htmlBody, name: '選擇權警示'});
+        const sentAt = new Date();
+        queue.getRange(rowNumber, map['狀態'] + 1).setValue('SENT');
+        queue.getRange(rowNumber, map['寄送時間'] + 1).setValue(sentAt);
+        queue.getRange(rowNumber, map['最後錯誤'] + 1).clearContent();
+        appendAlertLogForEvent_(row[map['事件ID']], eventType, payload, recipient, sentAt);
       } catch (error) {
-        console.error(`無法解析待寄信資料：${error}`);
-        continue;
-      }
-      const items = Array.isArray(payload.items) ? payload.items : [];
-      if (!items.length) continue;
-      const ticker = row[headerMap['股票代號']];
-      const expiry = formatSheetDate_(row[headerMap['到期日']]);
-      const total = Number(payload.total || items.length);
-      const subject = `【選擇權警示】${ticker} ${expiry}：${total} 個履約價格符合條件`;
-      const message = buildScanAlertEmail_(ticker, expiry, payload, spreadsheet.getUrl());
-      MailApp.sendEmail({
-        to: recipient,
-        subject: subject,
-        body: message.body,
-        htmlBody: message.htmlBody,
-        name: '選擇權警示',
-      });
-
-      const sentAt = new Date();
-      sheet.getRange(index + 1, headerMap['待寄信'] + 1).clearContent();
-      sheet.getRange(index + 1, headerMap['最後通知時間'] + 1).setValue(sentAt);
-      const logRows = items.map(item => [
-        sentAt,
-        row[headerMap['掃描ID']],
-        ticker,
-        row[headerMap['到期日']],
-        item.option_type || '',
-        item.strike ?? '',
-        item.bid ?? '',
-        item.delta ?? '',
-        item.vega ?? '',
-        item.annual_return ?? '',
-        item.open_interest ?? '',
-        item.dte ?? '',
-        item.contract_symbol || '',
-        recipient,
-        '已寄送',
-        item.ask ?? '',
-        item.spread_rate ?? '',
-        item.gamma ?? '',
-        item.theta ?? '',
-      ]);
-      if (logRows.length) {
-        alertLog.getRange(alertLog.getLastRow() + 1, 1, logRows.length, APP.ALERT_HEADERS.length).setValues(logRows);
+        const retries = Number(row[map['重試次數']] || 0) + 1;
+        const delayMinutes = Math.min(5 * Math.pow(2, retries - 1), 60);
+        queue.getRange(rowNumber, map['狀態'] + 1).setValue('FAILED');
+        queue.getRange(rowNumber, map['重試次數'] + 1).setValue(retries);
+        queue.getRange(rowNumber, map['下次重試時間'] + 1).setValue(new Date(Date.now() + delayMinutes * 60000));
+        queue.getRange(rowNumber, map['最後錯誤'] + 1).setValue(String(error.message || error).slice(0, 1000));
       }
     }
   } finally {
@@ -280,64 +261,42 @@ function processPendingEmails() {
   }
 }
 
-function buildScanAlertEmail_(ticker, expiry, payload, spreadsheetUrl) {
-  const items = payload.items || [];
-  const lines = [
-    `${ticker} ${expiry} 有 ${payload.total || items.length} 個新符合條件的合約：`,
-    '',
-  ];
-  items.forEach(item => {
-    lines.push(
-      `${item.option_type}｜履約價 ${formatNumber_(item.strike, 4)}｜Bid ${formatNumber_(item.bid, 4)}｜` +
-      `Spread ${formatPercent_(item.spread_rate)}｜Delta ${formatNumber_(item.delta, 4)}｜Gamma ${formatNumber_(item.gamma, 4)}｜` +
-      `Theta ${formatNumber_(item.theta, 4)}｜Vega ${formatNumber_(item.vega, 4)}｜` +
-      `年化 ${formatPercent_(item.annual_return)}｜未平倉 ${formatNumber_(item.open_interest, 0)}｜DTE ${item.dte ?? '—'}`
-    );
+function buildQueueEmail_(eventType, payload, spreadsheetUrl) {
+  const close = eventType.indexOf('FIRST_CLOSE') === 0;
+  const supplement = eventType === 'FIRST_CLOSE_SUPPLEMENT';
+  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  const total = groups.reduce((sum, group) => sum + (group.items || []).length, 0);
+  const subject = close
+    ? `【選擇權收盤通知】${payload.market_date || ''}${supplement ? '（補充）' : ''}：${total} 個符合第一門檻`
+    : `【選擇權即時通知】${groups[0]?.ticker || ''} ${groups[0]?.expiry || ''}：${total} 個符合第二門檻`;
+  const lines = [subject.replace('【選擇權收盤通知】', '').replace('【選擇權即時通知】', ''), ''];
+  const htmlSections = [];
+  groups.forEach(group => {
+    const items = group.items || [];
+    const baseline = group.baseline_changed ? '（條件已變更，本日重建比較基準）' : '';
+    lines.push(`${group.ticker} ${group.expiry}：${items.length} 筆${baseline}`);
+    items.forEach(item => lines.push(`${item.is_new ? '【今日新增】' : ''}${item.option_type}｜履約價 ${formatNumber_(item.strike, 4)}｜標的 ${formatNumber_(item.underlying_price, 4)}｜Bid ${formatNumber_(item.bid, 4)}｜Delta ${formatNumber_(item.delta, 4)}｜Spread ${formatPercent_(item.spread_rate)}｜年化 ${formatPercent_(item.annual_return)}｜未平倉 ${formatNumber_(item.open_interest, 0)}｜DTE ${item.dte ?? '—'}`));
+    const rows = items.map(item => `<tr>${[item.is_new ? '今日新增' : '', item.option_type || '', formatNumber_(item.strike, 4), formatNumber_(item.underlying_price, 4), formatNumber_(item.bid, 4), formatNumber_(item.delta, 4), formatPercent_(item.spread_rate), formatPercent_(item.annual_return), formatNumber_(item.open_interest, 0), item.dte ?? '—'].map(value => `<td style="padding:6px;border:1px solid #cbd5e1">${escapeHtml_(value)}</td>`).join('')}</tr>`).join('');
+    htmlSections.push(`<h3>${escapeHtml_(group.ticker)} ${escapeHtml_(group.expiry)}：${items.length} 筆 ${escapeHtml_(baseline)}</h3><table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px"><thead><tr style="background:#e5e7eb">${['狀態','類型','履約價','標的股價','Bid','Delta','Spread','年化報酬率','未平倉','DTE'].map(x => `<th style="padding:6px;border:1px solid #cbd5e1">${x}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`);
   });
-  if (Number(payload.total || 0) > items.length) lines.push('', `其餘 ${Number(payload.total) - items.length} 個請開啟工作表查看。`);
-  lines.push('', '年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365；不含手續費、稅金及指派風險。');
-  lines.push('Greeks 為 Black-Scholes-Merton 估算值，不是 Yahoo 原始欄位。');
-  lines.push(`開啟試算表：${spreadsheetUrl}`);
+  const failed = Array.isArray(payload.failed_scans) ? payload.failed_scans : [];
+  if (failed.length) lines.push('', `本次收盤資料不完整，尚待補抓：${failed.join('、')}`);
+  lines.push('', '年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365；不含手續費、稅金及指派風險。', `開啟試算表：${spreadsheetUrl}`);
+  const warning = failed.length ? `<p style="color:#991b1b"><strong>本次資料不完整，尚待補抓：</strong>${escapeHtml_(failed.join('、'))}</p>` : '';
+  return {subject, body: lines.join('\n'), htmlBody: `${htmlSections.join('')}${warning}<p style="color:#475569;font-size:12px">年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365；不含手續費、稅金及指派風險。</p><p><a href="${escapeHtml_(spreadsheetUrl)}">開啟 Google Sheet</a></p>`};
+}
 
-  const tableRows = items.map(item => `
-    <tr>
-      <td>${escapeHtml_(item.option_type || '')}</td>
-      <td>${escapeHtml_(formatNumber_(item.strike, 4))}</td>
-      <td>${escapeHtml_(formatNumber_(item.bid, 4))}</td>
-      <td>${escapeHtml_(formatPercent_(item.spread_rate))}</td>
-      <td>${escapeHtml_(formatNumber_(item.delta, 4))}</td>
-      <td>${escapeHtml_(formatNumber_(item.gamma, 4))}</td>
-      <td>${escapeHtml_(formatNumber_(item.theta, 4))}</td>
-      <td>${escapeHtml_(formatNumber_(item.vega, 4))}</td>
-      <td>${escapeHtml_(formatPercent_(item.annual_return))}</td>
-      <td>${escapeHtml_(formatNumber_(item.open_interest, 0))}</td>
-      <td>${escapeHtml_(item.dte ?? '—')}</td>
-    </tr>`).join('');
-  const more = Number(payload.total || 0) > items.length
-    ? `<p>其餘 ${Number(payload.total) - items.length} 個請開啟工作表查看。</p>`
-    : '';
-  const htmlBody = `
-    <p><strong>${escapeHtml_(ticker)} ${escapeHtml_(expiry)}</strong> 有 ${escapeHtml_(payload.total || items.length)} 個新符合條件的合約：</p>
-    <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px">
-      <thead><tr style="background:#e5e7eb">
-        <th style="padding:7px;border:1px solid #cbd5e1">類型</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">履約價</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">Bid</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">Spread</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">Delta</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">Gamma</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">Theta</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">Vega</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">年化報酬率</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">未平倉</th>
-        <th style="padding:7px;border:1px solid #cbd5e1">DTE</th>
-      </tr></thead><tbody>${tableRows}</tbody>
-    </table>
-    ${more}
-    <p style="color:#475569;font-size:12px">年化報酬率＝Bid ÷ 年化本金 ÷ DTE × 365；不含手續費、稅金及指派風險。<br>
-    Greeks 為 Black-Scholes-Merton 估算值，不是 Yahoo 原始欄位。</p>
-    <p><a href="${escapeHtml_(spreadsheetUrl)}">開啟 Google Sheet</a></p>`;
-  return {body: lines.join('\n'), htmlBody: htmlBody};
+function appendAlertLogForEvent_(eventId, eventType, payload, recipient, sentAt) {
+  const log = getSpreadsheet_().getSheetByName(APP.SHEETS.ALERTS);
+  if (!log) return;
+  const rows = [];
+  (payload.groups || []).forEach(group => (group.items || []).forEach(item => rows.push([
+    sentAt, group.scan_id || '', group.ticker || '', group.expiry || '', item.option_type || '',
+    item.strike ?? '', item.bid ?? '', item.delta ?? '', item.underlying_price ?? '', item.annual_return ?? '',
+    item.open_interest ?? '', item.dte ?? '', item.contract_symbol || '', recipient, '已寄送', item.ask ?? '',
+    item.spread_rate ?? '', eventId || '', eventType || ''
+  ])));
+  if (rows.length) log.getRange(log.getLastRow() + 1, 1, rows.length, APP.ALERT_HEADERS.length).setValues(rows);
 }
 
 function validateScanInput_(payload) {
@@ -350,15 +309,26 @@ function validateScanInput_(payload) {
   }
   if (!['ALL', 'CALL', 'PUT'].includes(displayType)) throw new Error('顯示類型必須是 ALL、CALL 或 PUT');
 
-  const delta = parseConditionPair_(payload.deltaOperator, payload.deltaThreshold, 'Delta');
-  if (delta.threshold !== null && delta.threshold > 1) throw new Error('Delta門檻必須介於 0 與 1');
-  const spread = parseConditionPair_(payload.spreadOperator, payload.spreadThreshold, 'Bid-Ask價差率');
-  if (spread.threshold !== null) spread.threshold /= 100;
-  const annual = parseConditionPair_(payload.annualReturnOperator, payload.annualReturnThreshold, '年化報酬率');
-  if (annual.threshold !== null) annual.threshold /= 100;
+  const parseThreshold = (prefix, label) => {
+    const delta = parseConditionPair_(payload[`${prefix}DeltaOperator`], payload[`${prefix}DeltaThreshold`], `${label} Delta`);
+    if (delta.threshold !== null && delta.threshold > 1) throw new Error(`${label} Delta門檻必須介於 0 與 1`);
+    const spread = parseConditionPair_(payload[`${prefix}SpreadOperator`], payload[`${prefix}SpreadThreshold`], `${label} Bid-Ask價差率`);
+    if (spread.threshold !== null) spread.threshold /= 100;
+    const annual = parseConditionPair_(payload[`${prefix}AnnualReturnOperator`], payload[`${prefix}AnnualReturnThreshold`], `${label}年化報酬率`);
+    if (annual.threshold !== null) annual.threshold /= 100;
+    const openInterestMin = parseOptionalNonNegativeNumber_(payload[`${prefix}OpenInterestMin`], `${label}未平倉口數`);
+    if (openInterestMin !== null && !Number.isInteger(openInterestMin)) throw new Error(`${label}未平倉口數必須是整數`);
+    const enabled = payload[`${prefix}Enabled`] === true;
+    if (enabled && [delta.threshold, spread.threshold, annual.threshold, openInterestMin].every(value => value === null)) {
+      throw new Error(`${label}已啟用，至少要設定一個條件`);
+    }
+    return {enabled, deltaOperator: delta.operator, deltaThreshold: delta.threshold,
+      spreadOperator: spread.operator, spreadThreshold: spread.threshold,
+      annualReturnOperator: annual.operator, annualReturnThreshold: annual.threshold, openInterestMin};
+  };
+  const first = parseThreshold('first', '第一門檻');
+  const second = parseThreshold('second', '第二門檻');
   const callCostBasis = parseOptionalPositiveNumber_(payload.callCostBasis, 'CALL持股成本');
-  const openInterestMin = parseOptionalNonNegativeNumber_(payload.openInterestMin, '未平倉口數');
-  if (openInterestMin !== null && !Number.isInteger(openInterestMin)) throw new Error('未平倉口數必須是整數');
 
   const scanId = `${ticker}|${expiry}`;
   const sheetName = `${ticker.replace(/[^A-Z0-9._-]/g, '')}_${expiry}`.slice(0, 100);
@@ -366,14 +336,9 @@ function validateScanInput_(payload) {
     ticker,
     expiry,
     displayType,
-    deltaOperator: delta.operator,
-    deltaThreshold: delta.threshold,
-    spreadOperator: spread.operator,
-    spreadThreshold: spread.threshold,
-    annualReturnOperator: annual.operator,
-    annualReturnThreshold: annual.threshold,
+    first,
+    second,
     callCostBasis,
-    openInterestMin,
     emailEnabled: payload.emailEnabled !== false,
     note: String(payload.note || '').trim().slice(0, 500),
     scanId,
@@ -411,6 +376,9 @@ function parseOptionalPositiveNumber_(value, label) {
 function ensureSystemSheets_() {
   const spreadsheet = getSpreadsheet_();
   migrateScanSchema050_(spreadsheet);
+  migrateScanSchema070_(spreadsheet);
+  migrateCloseTrendSchema070_(spreadsheet);
+  migrateAlertLogSchema070_(spreadsheet);
   migrateSettingsSchema050_(spreadsheet);
   const definitions = [
     [APP.SHEETS.DASHBOARD, ['選擇權警示控制台']],
@@ -419,6 +387,8 @@ function ensureSystemSheets_() {
     [APP.SHEETS.ALERTS, APP.ALERT_HEADERS],
     [APP.SHEETS.SYSTEM, ['時間(UTC)', '等級', '訊息', '詳細資料']],
     [APP.SHEETS.CLOSE_TRENDS, APP.CLOSE_TREND_HEADERS],
+    [APP.SHEETS.QUEUE, APP.QUEUE_HEADERS],
+    [APP.SHEETS.CLOSE_STATE, APP.CLOSE_STATE_HEADERS],
   ];
   definitions.forEach(([name, headers]) => {
     let sheet = spreadsheet.getSheetByName(name);
@@ -431,6 +401,79 @@ function ensureSystemSheets_() {
   });
   seedSettings_();
   seedDashboard_();
+  const queue = spreadsheet.getSheetByName(APP.SHEETS.QUEUE);
+  const closeState = spreadsheet.getSheetByName(APP.SHEETS.CLOSE_STATE);
+  if (queue) queue.hideSheet();
+  if (closeState) closeState.hideSheet();
+}
+
+function migrateScanSchema070_(spreadsheet) {
+  const sheet = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
+  if (!sheet || sheet.getLastColumn() < 1) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  if (headers.slice(0, APP.SCAN_HEADERS.length).join('\u001f') === APP.SCAN_HEADERS.join('\u001f')) return;
+  if (!headers.includes('股票代號') || !headers.includes('到期日')) return;
+  const source = sheet.getLastRow() >= 2 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues() : [];
+  const oldIndex = Object.fromEntries(headers.map((header, index) => [header, index]));
+  const oldValue = (row, name) => oldIndex[name] === undefined ? '' : row[oldIndex[name]];
+  const migrated = source.map(row => {
+    const output = Array(APP.SCAN_HEADERS.length).fill('');
+    const set = (name, value) => { output[APP.SCAN_HEADERS.indexOf(name)] = value; };
+    ['啟用','掃描ID','股票代號','到期日','顯示類型','CALL持股成本','Email通知','備註',
+     '狀態','標的股價','合約數','資料狀態','錯誤訊息','工作表'].forEach(name => set(name, oldValue(row, name)));
+    const mappings = {
+      '第一Delta條件':'Delta條件', '第一Delta門檻':'Delta門檻',
+      '第一Bid-Ask價差條件':'Bid-Ask價差條件', '第一Bid-Ask價差門檻':'Bid-Ask價差門檻',
+      '第一年化報酬率條件':'年化報酬率條件', '第一年化報酬率門檻':'年化報酬率門檻',
+      '第一未平倉大於(口)':'未平倉大於(口)', '第一符合數':'符合數',
+      '最後嘗試時間':'最後抓取時間', '最後成功抓取時間':'最後抓取時間'
+    };
+    Object.entries(mappings).forEach(([target, sourceName]) => set(target, oldValue(row, sourceName)));
+    const hasFirst = ['Delta門檻','Bid-Ask價差門檻','年化報酬率門檻','未平倉大於(口)']
+      .some(name => oldValue(row, name) !== '' && oldValue(row, name) !== null);
+    set('第一門檻啟用', hasFirst);
+    set('第二門檻啟用', false);
+    return output;
+  });
+  if (sheet.getMaxColumns() < APP.SCAN_HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), APP.SCAN_HEADERS.length - sheet.getMaxColumns());
+  if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.max(headers.length, APP.SCAN_HEADERS.length)).clearContent();
+  sheet.getRange(1, 1, 1, APP.SCAN_HEADERS.length).setValues([APP.SCAN_HEADERS]);
+  if (migrated.length) sheet.getRange(2, 1, migrated.length, APP.SCAN_HEADERS.length).setValues(migrated);
+}
+
+function migrateCloseTrendSchema070_(spreadsheet) {
+  const sheet = spreadsheet.getSheetByName(APP.SHEETS.CLOSE_TRENDS);
+  if (!sheet || sheet.getLastColumn() < 40 || sheet.getLastRow() < 2) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  if (headers.includes('標的－履約價差率')) return;
+  const values = sheet.getRange(2, 12, sheet.getLastRow() - 1, 5).getValues();
+  const backfill = values.map(row => {
+    const strike = Number(row[0]);
+    const spot = Number(row[4]);
+    if (!Number.isFinite(strike) || !Number.isFinite(spot) || spot === 0) return ['', ''];
+    const difference = spot - strike;
+    return [difference, difference / spot];
+  });
+  if (sheet.getMaxColumns() < 42) sheet.insertColumnsAfter(sheet.getMaxColumns(), 42 - sheet.getMaxColumns());
+  sheet.getRange(2, 41, backfill.length, 2).setValues(backfill);
+}
+
+function migrateAlertLogSchema070_(spreadsheet) {
+  const sheet = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
+  if (!sheet || sheet.getLastColumn() < 1) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  if (headers.slice(0, APP.ALERT_HEADERS.length).join('\u001f') === APP.ALERT_HEADERS.join('\u001f')) return;
+  if (!headers.includes('寄送時間') || !headers.includes('合約代號')) return;
+  const values = sheet.getLastRow() >= 2 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues() : [];
+  const index = Object.fromEntries(headers.map((header, position) => [header, position]));
+  const migrated = values.map(row => APP.ALERT_HEADERS.map(header => {
+    if (header === '事件類型') return 'LEGACY';
+    if (header === '事件ID' || header === '標的股價') return '';
+    return index[header] === undefined ? '' : row[index[header]];
+  }));
+  if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.max(headers.length, APP.ALERT_HEADERS.length)).clearContent();
+  sheet.getRange(1, 1, 1, APP.ALERT_HEADERS.length).setValues([APP.ALERT_HEADERS]);
+  if (migrated.length) sheet.getRange(2, 1, migrated.length, APP.ALERT_HEADERS.length).setValues(migrated);
 }
 
 function migrateScanSchema050_(spreadsheet) {
@@ -523,8 +566,8 @@ function seedDashboard_() {
   sheet.getRange('A2:H2').merge().setValue('Yahoo Finance + yfinance｜完整期權鍊｜Greeks 為模型估算值');
   sheet.getRange('A4:H4').setValues([['啟用掃描', '數量', '符合合約', '數量', '資料異常', '數量', '最後成功抓取', '時間']]);
   sheet.getRange('B5').setFormula('=COUNTIF(\'掃描設定\'!$A$2:$A$1000,TRUE)');
-  sheet.getRange('D5').setFormula('=SUM(\'掃描設定\'!$S$2:$S$1000)');
-  sheet.getRange('F5').setFormula('=COUNTIF(\'掃描設定\'!$U$2:$U$1000,"*不足*")+COUNTIF(\'掃描設定\'!$U$2:$U$1000,"*失敗*")+COUNTIF(\'掃描設定\'!$U$2:$U$1000,"*限制*")');
+  sheet.getRange('D5').setFormula('=SUM(\'掃描設定\'!$AB$2:$AB$1000)+SUM(\'掃描設定\'!$AC$2:$AC$1000)');
+  sheet.getRange('F5').setFormula('=COUNTIF(\'掃描設定\'!$AF$2:$AF$1000,"*不足*")+COUNTIF(\'掃描設定\'!$AF$2:$AF$1000,"*失敗*")+COUNTIF(\'掃描設定\'!$AF$2:$AF$1000,"*限制*")');
   sheet.getRange('H5').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("最後成功抓取(UTC)",\'設定\'!$A$2:$A$40,0)),"")');
   sheet.getRange('A7:B10').setValues([
     ['系統狀態', ''],
@@ -537,7 +580,7 @@ function seedDashboard_() {
   sheet.getRange('B9').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("下次允許抓取(UTC)",\'設定\'!$A$2:$A$40,0)),"")');
   sheet.getRange('B10').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$40,MATCH("系統版本",\'設定\'!$A$2:$A$40,0)),"")');
   sheet.getRange('A7:A10').setBackground('#F8FAFC').setFontWeight('bold');
-  sheet.getRange('B7:B10').setFontColor('#008000');
+  sheet.getRange('B7:B10').setFontColor('#111827');
   sheet.getRange('F7:G10').setValues([
     ['立即手動更新', '勾選右側核取方塊'],
     ['GitHub 自動更新', ''],
@@ -552,8 +595,17 @@ function seedDashboard_() {
   sheet.getRange('H10').setFormula('=IFERROR(INDEX(\'設定\'!$B$2:$B$50,MATCH("GitHub 最後要求狀態",\'設定\'!$A$2:$A$50,0)),"")');
   sheet.getRange('F7:F10').setBackground('#F8FAFC').setFontWeight('bold');
   sheet.getRange('G7:G10').setFontColor('#475569').setFontSize(9).setWrap(true);
-  sheet.getRange('H8:H10').setFontColor('#008000').setWrap(true);
+  sheet.getRange('H8:H10').setFontColor('#111827').setWrap(true);
   sheet.getRange('H7').setBackground('#DBEAFE').setHorizontalAlignment('center');
+  const dashboardRules = [
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('成功').setFontColor('#166534').setBackground('#DCFCE7').setRanges([sheet.getRange('B7')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH(B7,"部分|限制|等待")').setFontColor('#92400E').setBackground('#FEF3C7').setRanges([sheet.getRange('B7')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH(B7,"錯誤|失敗")').setFontColor('#991B1B').setBackground('#FEE2E2').setRanges([sheet.getRange('B7')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH(H10,"資料更新成功")').setFontColor('#166534').setBackground('#DCFCE7').setRanges([sheet.getRange('H10')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH(H10,"等待|已接受")').setFontColor('#92400E').setBackground('#FEF3C7').setRanges([sheet.getRange('H10')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH(H10,"失敗|異常")').setFontColor('#991B1B').setBackground('#FEE2E2').setRanges([sheet.getRange('H10')]).build(),
+  ];
+  sheet.setConditionalFormatRules(dashboardRules);
   sheet.getRange('A12:H12').merge().setValue('使用方式');
   sheet.getRange('A13:H18').mergeAcross();
   sheet.getRange('A13:A18').setValues([
@@ -561,7 +613,7 @@ function seedDashboard_() {
     ['2. 在「設定」確認固定通知信箱，再從選單設定 90 天 GitHub 金鑰。'],
     ['3. 用表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。'],
     ['4. 開盤、盤中整點與收盤自動更新；正式收盤會同步保存 Delta 0.10／0.15／0.20 趨勢。'],
-    ['5. 第一次掃描只建立基準；之後只有新符合全部條件的合約才寄信。'],
+    ['5. 第一門檻每天收盤彙總全部符合項目；第二門檻首次符合時即時通知。'],
     ['6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。'],
   ]);
   sheet.getRange('A1:H1').setBackground('#F1F5F9').setFontColor('#1D4ED8').setFontWeight('bold').setFontSize(18);
@@ -586,23 +638,38 @@ function ensureChainSheet_(sheetName) {
   }
   sheet.getRange(1, 1, 1, APP.CHAIN_HEADERS.length).setValues([APP.CHAIN_HEADERS]);
   sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(4);
+  sheet.setFrozenColumns(5);
   sheet.getRange(1, 1, 1, APP.CHAIN_HEADERS.length)
     .setBackground('#E5E7EB')
     .setFontWeight('bold')
     .setFontColor('#111827')
     .setWrap(true);
-  sheet.getRange('C:C').setNumberFormat('0.0000');
-  sheet.getRange('E:I').setNumberFormat('0.0000');
-  sheet.getRange('J:J').setNumberFormat('0.00%');
+  sheet.getRange('E:G').setNumberFormat('0.0000');
+  sheet.getRange('H:H').setNumberFormat('0.00%');
   sheet.getRange('K:K').setNumberFormat('0.0000');
-  sheet.getRange('M:O').setNumberFormat('0.00%');
-  sheet.getRange('Q:U').setNumberFormat('0.0000');
-  sheet.getRange('V:V').setNumberFormat('0');
-  sheet.getRange('W:W').setNumberFormat('0.00%');
-  sheet.getRange('X:X').setNumberFormat('0.0000');
-  sheet.getRange('Y:Z').setNumberFormat('#,##0');
-  sheet.getRange('AJ:AK').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('N:N').setNumberFormat('0.00%');
+  sheet.getRange('Q:Q').setNumberFormat('#,##0');
+  sheet.getRange('T:T').setNumberFormat('0');
+  sheet.getRange('U:U').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('V:X').setNumberFormat('0.0000');
+  sheet.getRange('Y:Y').setNumberFormat('#,##0');
+  sheet.getRange('Z:Z').setNumberFormat('0.0000');
+  sheet.getRange('AA:AA').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('AB:AE').setNumberFormat('0.0000');
+  sheet.getRange('AF:AG').setNumberFormat('0.0000');
+  sheet.getRange('AI:AJ').setNumberFormat('0.00%');
+  sheet.getRange('AL:AL').setNumberFormat('0.0000');
+  sheet.setColumnWidths(1, APP.CHAIN_HEADERS.length, 105);
+  sheet.setColumnWidth(1, 115);
+  sheet.setColumnWidths(2, 2, 110);
+  sheet.setColumnWidth(5, 90);
+  sheet.setColumnWidth(21, 145);
+  sheet.hideColumns(22, 6);
+  sheet.hideColumns(28, 11);
+  sheet.hideColumns(39, 7);
+  if (sheet.getFilter()) sheet.getFilter().remove();
+  const filter = sheet.getRange(1, 1, Math.max(sheet.getMaxRows(), 2), APP.CHAIN_HEADERS.length).createFilter();
+  filter.setColumnFilterCriteria(1, SpreadsheetApp.newFilterCriteria().setHiddenValues(['未符合', '資料不足']).build());
   applyChainConditionalFormatting_(sheet);
 }
 
@@ -622,28 +689,30 @@ function applyScanFormatting_() {
     .setAllowInvalid(false)
     .build();
   sheet.getRange('A2:A1000').setDataValidation(checkboxRule);
-  sheet.getRange('N2:N1000').setDataValidation(checkboxRule);
+  ['F', 'N', 'W'].forEach(column => sheet.getRange(`${column}2:${column}1000`).setDataValidation(checkboxRule));
   sheet.getRange('E2:E1000').setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(['ALL', 'CALL', 'PUT'], true).setAllowInvalid(false).build()
   );
-  ['F', 'H', 'J'].forEach(column => sheet.getRange(`${column}2:${column}1000`).setDataValidation(
+  ['G', 'I', 'K', 'O', 'Q', 'S'].forEach(column => sheet.getRange(`${column}2:${column}1000`).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(['≥', '≤'], true).setAllowInvalid(false).build()
   ));
   sheet.getRange('D:D').setNumberFormat('yyyy-mm-dd');
-  sheet.getRange('G:G').setNumberFormat('0.0000');
-  sheet.getRange('I:I').setNumberFormat('0.00%');
-  sheet.getRange('K:K').setNumberFormat('0.00%');
-  sheet.getRange('L:L').setNumberFormat('0.0000');
+  sheet.getRange('H:H').setNumberFormat('0.0000');
+  sheet.getRange('J:L').setNumberFormat('0.00%');
   sheet.getRange('M:M').setNumberFormat('#,##0');
-  sheet.getRange('Q:Q').setNumberFormat('0.0000');
-  sheet.getRange('R:S').setNumberFormat('#,##0');
-  sheet.getRange('T:T').setNumberFormat('yyyy-mm-dd hh:mm:ss');
-  sheet.getRange('W:W').setNumberFormat('yyyy-mm-dd hh:mm:ss');
-  const range = sheet.getRange('A2:AA1000');
+  sheet.getRange('P:P').setNumberFormat('0.0000');
+  sheet.getRange('R:T').setNumberFormat('0.00%');
+  sheet.getRange('U:U').setNumberFormat('#,##0');
+  sheet.getRange('V:V').setNumberFormat('0.0000');
+  sheet.getRange('Z:Z').setNumberFormat('0.0000');
+  sheet.getRange('AA:AC').setNumberFormat('#,##0');
+  sheet.getRange('AD:AE').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.getRange('AL:AL').setNumberFormat('yyyy-mm-dd');
+  const range = sheet.getRange('A2:AL1000');
   const rules = [
     SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$A2=FALSE').setBackground('#F3F4F6').setRanges([range]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$S2>0').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($U2,"不足|過期|限制|失敗|無資料")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AB2>0,$AC2>0)').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($AF2,"不足|過期|限制|失敗|無資料")').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
 }
@@ -673,6 +742,8 @@ function applyCloseTrendFormatting_() {
   sheet.getRange('AH:AH').setNumberFormat('yyyy-mm-dd hh:mm:ss');
   sheet.getRange('AI:AI').setNumberFormat('0.00%');
   sheet.getRange('AK:AK').setNumberFormat('0.00%');
+  sheet.getRange('AO:AO').setNumberFormat('0.0000');
+  sheet.getRange('AP:AP').setNumberFormat('0.00%');
   sheet.setColumnWidths(1, APP.CLOSE_TREND_HEADERS.length, 110);
   sheet.setColumnWidth(1, 300);
   sheet.setColumnWidth(5, 180);
@@ -681,6 +752,7 @@ function applyCloseTrendFormatting_() {
   sheet.setColumnWidth(38, 220);
   sheet.setColumnWidth(39, 260);
   sheet.setColumnWidth(40, 320);
+  sheet.setColumnWidths(41, 2, 130);
   const rowCount = Math.max(sheet.getMaxRows() - 1, 1);
   const range = sheet.getRange(2, 1, rowCount, APP.CLOSE_TREND_HEADERS.length);
   const rules = [
@@ -698,7 +770,10 @@ function applyCloseTrendFormatting_() {
 }
 
 function hasScanData_(row) {
-  const meaningfulIndexes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14];
+  const meaningfulIndexes = APP.SCAN_HEADERS.slice(0, 24)
+    .map((header, index) => ({header, index}))
+    .filter(item => !['啟用', '第一門檻啟用', '第二門檻啟用', 'Email通知'].includes(item.header))
+    .map(item => item.index);
   return meaningfulIndexes.some(index => row[index] !== '' && row[index] !== null);
 }
 
@@ -721,7 +796,7 @@ function clearPlaceholderCheckboxValues_(sheet) {
       previous = current;
       continue;
     }
-    ranges.push(`A${start}:A${previous}`, `N${start}:N${previous}`);
+    ranges.push(`A${start}:A${previous}`, `F${start}:F${previous}`, `N${start}:N${previous}`, `W${start}:W${previous}`);
     start = current;
     previous = current;
   }
@@ -729,10 +804,11 @@ function clearPlaceholderCheckboxValues_(sheet) {
 }
 
 function applyChainConditionalFormatting_(sheet) {
-  const range = sheet.getRange('A2:AL1000');
+  const range = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), APP.CHAIN_HEADERS.length);
   const rules = [
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AE2="符合",$AF2="持續符合")').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($AE2="資料不足",REGEXMATCH($AL2,"不足|無效"))').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=REGEXMATCH($A2,"第二")').setBackground('#D1FAE5').setFontColor('#065F46').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$A2="第一門檻"').setBackground('#DCFCE7').setFontColor('#166534').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=OR($A2="資料不足",REGEXMATCH($AS2,"不足|無效"))').setBackground('#FEF3C7').setFontColor('#92400E').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
 }
@@ -759,7 +835,7 @@ function applyAllChainFormatting_() {
 function normalizeUserFacingTimestamps_() {
   const spreadsheet = getSpreadsheet_();
   const scans = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
-  if (scans) normalizeTimestampColumns_(scans, ['最後抓取時間', '最後通知時間']);
+  if (scans) normalizeTimestampColumns_(scans, ['最後嘗試時間', '最後成功抓取時間']);
 
   const alerts = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
   if (alerts) normalizeTimestampColumns_(alerts, ['寄送時間']);
@@ -1044,7 +1120,9 @@ function recordGitHubDispatchSuccess_(now, mode) {
   setSettingsValues_({
     'GitHub 自動更新': '已啟用（開盤／盤中整點／收盤）',
     'GitHub 最後要求(UTC)': timestamp,
-    'GitHub 最後要求狀態': mode === 'automatic' ? '自動要求成功' : '手動要求成功',
+    'GitHub 最後要求狀態': mode === 'automatic'
+      ? '自動要求已接受，等待資料更新完成'
+      : '手動要求已接受，等待資料更新完成',
     'Apps Script 成功啟動次數': successCount,
     'GitHub 原生排程': '已移除（0.5.0）',
   });
@@ -1159,12 +1237,14 @@ function formatSheetDate_(value) {
 }
 
 function formatNumber_(value, digits) {
+  if (value === '' || value === null || value === undefined) return '—';
   const number = Number(value);
   if (!Number.isFinite(number)) return '—';
   return number.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
 }
 
 function formatPercent_(value) {
+  if (value === '' || value === null || value === undefined) return '—';
   const number = Number(value);
   return Number.isFinite(number) ? `${(number * 100).toFixed(2)}%` : '—';
 }

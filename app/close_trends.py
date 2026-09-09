@@ -194,6 +194,23 @@ def build_close_trend_rows(
                         "Greeks模型": selected.get("Greeks模型"),
                         "資料狀態": selected.get("資料狀態") or "正常",
                         "備註／未選取原因": "",
+                        "標的－履約價差": (
+                            _optional_float(selected.get("標的股價"))
+                            - _optional_float(selected.get("履約價"))
+                            if _optional_float(selected.get("標的股價")) is not None
+                            and _optional_float(selected.get("履約價")) is not None
+                            else None
+                        ),
+                        "標的－履約價差率": (
+                            (
+                                _optional_float(selected.get("標的股價"))
+                                - _optional_float(selected.get("履約價"))
+                            )
+                            / _optional_float(selected.get("標的股價"))
+                            if _optional_float(selected.get("標的股價")) not in (None, 0)
+                            and _optional_float(selected.get("履約價")) is not None
+                            else None
+                        ),
                     }
                 )
                 result.append(output)

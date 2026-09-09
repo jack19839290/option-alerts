@@ -1,117 +1,53 @@
 <!doctype html>
 <html lang="zh-Hant">
-  <head>
-    <base target="_top">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      :root { color-scheme: light; font-family: Arial, "Noto Sans TC", sans-serif; }
-      body { margin: 0; background: #f8fafc; color: #111827; }
-      main { max-width: 720px; margin: 0 auto; padding: 22px; }
-      h1 { margin: 0 0 6px; font-size: 24px; }
-      .sub { margin: 0 0 18px; color: #64748b; line-height: 1.55; }
-      form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; background: white; padding: 20px; border: 1px solid #e5e7eb; border-radius: 12px; }
-      label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
-      .full { grid-column: 1 / -1; }
-      .condition { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 8px; }
-      input, select, textarea { box-sizing: border-box; width: 100%; padding: 10px 11px; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; background: white; }
-      input:focus, select:focus, textarea:focus { outline: 2px solid #93c5fd; border-color: #2563eb; }
-      textarea { min-height: 64px; resize: vertical; }
-      .check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
-      .check input { width: auto; }
-      .notice { grid-column: 1 / -1; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e40af; font-size: 12px; line-height: 1.5; }
-      button { grid-column: 1 / -1; border: 0; border-radius: 8px; padding: 11px 16px; background: #2563eb; color: white; font-weight: 700; cursor: pointer; }
-      button:disabled { background: #94a3b8; cursor: wait; }
-      #status { grid-column: 1 / -1; min-height: 22px; padding: 9px 11px; border-radius: 7px; display: none; }
-      #status.ok { display: block; background: #dcfce7; color: #166534; }
-      #status.error { display: block; background: #fee2e2; color: #991b1b; }
-      .hint { color: #64748b; font-size: 12px; font-weight: 400; line-height: 1.35; }
-      @media (max-width: 560px) {
-        form { grid-template-columns: 1fr; }
-        .full, button, #status, .notice { grid-column: 1; }
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>期權鍊掃描設定</h1>
-      <p class="sub">輸入股票與到期日後，系統會顯示 Yahoo 回傳的全部履約價。條件都可留空；所有已設定條件同時成立才會通知。</p>
-      <form id="scanForm">
-        <label>股票代號
-          <input name="ticker" required maxlength="15" placeholder="MU" autocomplete="off">
-        </label>
-        <label>到期日
-          <input name="expiry" type="date" required>
-        </label>
-        <label class="full">顯示類型
-          <select name="displayType">
-            <option value="ALL">全部 CALL＋PUT</option>
-            <option value="CALL">只顯示 CALL</option>
-            <option value="PUT">只顯示 PUT</option>
-          </select>
-        </label>
+<head>
+  <base target="_top"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{font-family:Arial,"Noto Sans TC",sans-serif;color:#111827}body{margin:0;background:#f8fafc}
+    main{max-width:820px;margin:auto;padding:20px}h1{margin:0 0 6px;font-size:24px}.sub{color:#64748b;line-height:1.55}
+    form{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;background:#fff;padding:20px;border:1px solid #e5e7eb;border-radius:12px}
+    label{display:grid;gap:6px;font-size:13px;font-weight:600}.full,fieldset,button,#status,.notice{grid-column:1/-1}
+    fieldset{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;border:1px solid #cbd5e1;border-radius:10px;padding:16px}
+    legend{padding:0 8px;font-weight:700;color:#1e40af}.condition{display:grid;grid-template-columns:.9fr 1.1fr;gap:8px}
+    input,select,textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:7px;font:inherit;background:#fff}
+    input:focus,select:focus,textarea:focus{outline:2px solid #93c5fd;border-color:#2563eb}.check{display:flex;align-items:center;gap:8px}.check input{width:auto}
+    .hint{font-size:12px;font-weight:400;color:#64748b;line-height:1.35}.notice{padding:11px;border-radius:8px;background:#eff6ff;color:#1e40af;font-size:12px;line-height:1.5}
+    textarea{min-height:64px;resize:vertical}button{border:0;border-radius:8px;padding:12px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}button:disabled{background:#94a3b8}
+    #status{display:none;padding:9px;border-radius:7px}#status.ok{display:block;background:#dcfce7;color:#166534}#status.error{display:block;background:#fee2e2;color:#991b1b}
+    @media(max-width:600px){form,fieldset{grid-template-columns:1fr}.full,fieldset,button,#status,.notice{grid-column:1}}
+  </style>
+</head>
+<body><main>
+  <h1>期權鍊掃描設定</h1>
+  <p class="sub">第一門檻用於每日收盤完整彙總；第二門檻用於盤中首次符合的即時通知。每組只會判斷已填寫的條件。</p>
+  <form id="scanForm">
+    <label>股票代號<input name="ticker" required maxlength="15" placeholder="MU" autocomplete="off"></label>
+    <label>到期日<input name="expiry" type="date" required></label>
+    <label class="full">顯示類型<select name="displayType"><option value="ALL">全部 CALL＋PUT</option><option value="CALL">只顯示 CALL</option><option value="PUT">只顯示 PUT</option></select></label>
 
-        <label>Delta條件
-          <span class="condition">
-            <select name="deltaOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select>
-            <input name="deltaThreshold" type="number" min="0" max="1" step="0.0001" placeholder="例如 0.30">
-          </span>
-        </label>
-        <label>Bid–Ask Spread條件
-          <span class="condition">
-            <select name="spreadOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select>
-            <input name="spreadThreshold" type="number" min="0" step="0.01" placeholder="例如 10 代表 10%">
-          </span>
-          <span class="hint">價差率＝(Ask−Bid)÷Mid；請輸入百分比數字。</span>
-        </label>
-        <label>年化報酬率條件
-          <span class="condition">
-            <select name="annualReturnOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select>
-            <input name="annualReturnThreshold" type="number" min="0" step="0.01" placeholder="例如 20 代表 20%">
-          </span>
-          <span class="hint">輸入百分比數字；PUT 本金為履約價。</span>
-        </label>
-        <label>CALL 持股成本
-          <input name="callCostBasis" type="number" min="0.0001" step="0.0001" placeholder="例如 60">
-          <span class="hint">只有 CALL 年化報酬率會使用；未填則 CALL 年化留白。</span>
-        </label>
-        <label>未平倉量大於多少口
-          <input name="openInterestMin" type="number" min="0" step="1" placeholder="例如 100">
-          <span class="hint">採嚴格大於；Yahoo 缺值時視為不符合。</span>
-        </label>
-        <label class="check"><input name="emailEnabled" type="checkbox" checked>啟用 Email 通知</label>
-        <label class="full">備註
-          <textarea name="note" maxlength="500" placeholder="選填"></textarea>
-        </label>
-        <div class="notice">第一次成功掃描只建立基準，不寄信。之後只有從不符合轉為符合的新合約才通知；同一輪的多個履約價會合併成一封信。</div>
-        <button id="submitButton" type="submit">儲存期權鍊掃描</button>
-        <div id="status"></div>
-      </form>
-    </main>
-    <script>
-      const form = document.getElementById('scanForm');
-      const button = document.getElementById('submitButton');
-      const statusBox = document.getElementById('status');
+    <fieldset><legend>第一門檻：每日收盤通知</legend>
+      <label class="check full"><input name="firstEnabled" type="checkbox" checked>啟用第一門檻</label>
+      <label>Delta條件<span class="condition"><select name="firstDeltaOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select><input name="firstDeltaThreshold" type="number" min="0" max="1" step="0.0001" placeholder="例如 0.30"></span><span class="hint">使用 |Delta| 絕對值判斷。</span></label>
+      <label>Bid–Ask Spread條件<span class="condition"><select name="firstSpreadOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select><input name="firstSpreadThreshold" type="number" min="0" step="0.01" placeholder="10 代表 10%"></span></label>
+      <label>年化報酬率條件<span class="condition"><select name="firstAnnualReturnOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select><input name="firstAnnualReturnThreshold" type="number" min="0" step="0.01" placeholder="20 代表 20%"></span></label>
+      <label>未平倉量大於<input name="firstOpenInterestMin" type="number" min="0" step="1" placeholder="例如 100"></label>
+    </fieldset>
 
-      form.addEventListener('submit', event => {
-        event.preventDefault();
-        button.disabled = true;
-        statusBox.className = '';
-        statusBox.style.display = 'none';
-        const data = Object.fromEntries(new FormData(form).entries());
-        data.emailEnabled = form.elements.emailEnabled.checked;
-        google.script.run
-          .withSuccessHandler(result => {
-            button.disabled = false;
-            statusBox.textContent = `${result.message}：${result.scanId}，工作表 ${result.sheetName}`;
-            statusBox.className = 'ok';
-          })
-          .withFailureHandler(error => {
-            button.disabled = false;
-            statusBox.textContent = error && error.message ? error.message : String(error);
-            statusBox.className = 'error';
-          })
-          .submitScan(data);
-      });
-    </script>
-  </body>
-</html>
+    <fieldset><legend>第二門檻：即時通知</legend>
+      <label class="check full"><input name="secondEnabled" type="checkbox">啟用第二門檻</label>
+      <label>Delta條件<span class="condition"><select name="secondDeltaOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select><input name="secondDeltaThreshold" type="number" min="0" max="1" step="0.0001" placeholder="例如 0.20"></span><span class="hint">使用 |Delta| 絕對值判斷。</span></label>
+      <label>Bid–Ask Spread條件<span class="condition"><select name="secondSpreadOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select><input name="secondSpreadThreshold" type="number" min="0" step="0.01" placeholder="10 代表 10%"></span></label>
+      <label>年化報酬率條件<span class="condition"><select name="secondAnnualReturnOperator"><option value="">不設定</option><option value="≥">大於等於</option><option value="≤">小於等於</option></select><input name="secondAnnualReturnThreshold" type="number" min="0" step="0.01" placeholder="25 代表 25%"></span></label>
+      <label>未平倉量大於<input name="secondOpenInterestMin" type="number" min="0" step="1" placeholder="例如 200"></label>
+    </fieldset>
+
+    <label>CALL 持股成本<input name="callCostBasis" type="number" min="0.0001" step="0.0001" placeholder="例如 60"><span class="hint">只有 CALL 年化報酬率使用；未填時 CALL 年化留白。</span></label>
+    <label class="check"><input name="emailEnabled" type="checkbox" checked>啟用 Email 通知</label>
+    <label class="full">備註<textarea name="note" maxlength="500" placeholder="選填"></textarea></label>
+    <div class="notice">第一門檻每天正式收盤都寄出全部符合項目，並標示相較前一個有效收盤的「今日新增」；即使 0 筆也會通知。第二門檻首次符合會寄信，持續符合不重複，連續兩次有效不符合後才重新待命。</div>
+    <button id="submitButton" type="submit">儲存期權鍊掃描</button><div id="status"></div>
+  </form>
+</main><script>
+const form=document.getElementById('scanForm'),button=document.getElementById('submitButton'),statusBox=document.getElementById('status');
+form.addEventListener('submit',event=>{event.preventDefault();button.disabled=true;statusBox.className='';statusBox.style.display='none';const data=Object.fromEntries(new FormData(form).entries());['firstEnabled','secondEnabled','emailEnabled'].forEach(name=>data[name]=form.elements[name].checked);google.script.run.withSuccessHandler(result=>{button.disabled=false;statusBox.textContent=`${result.message}：${result.scanId}，工作表 ${result.sheetName}`;statusBox.className='ok'}).withFailureHandler(error=>{button.disabled=false;statusBox.textContent=error&&error.message?error.message:String(error);statusBox.className='error'}).submitScan(data)});
+</script></body></html>

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .constants import (
     CHAIN_HEADERS,
+    CLOSE_ALERT_STATE_HEADERS,
+    CLOSE_ALERT_STATE_SHEET,
     CLOSE_TREND_HEADERS,
     CLOSE_TREND_SHEET,
+    NOTIFICATION_QUEUE_HEADERS,
+    NOTIFICATION_QUEUE_SHEET,
     SCAN_HEADERS,
     SCAN_OUTPUT_HEADERS,
     SCAN_SHEET,
@@ -57,8 +62,8 @@ def _is_blank_scan_row(headers: list[str], row: list[Any]) -> bool:
     values = dict(zip(headers, padded))
     meaningful_headers = [
         header
-        for header in SCAN_HEADERS[:15]
-        if header not in {"啟用", "Email通知"}
+        for header in SCAN_HEADERS[:24]
+        if header not in {"啟用", "第一門檻啟用", "第二門檻啟用", "Email通知"}
     ]
     return not any(
         value not in (None, "") for value in (values.get(header) for header in meaningful_headers)
@@ -249,7 +254,7 @@ class SheetsRepository:
             [scan.sheet_name for scan in targets], min_columns=len(CHAIN_HEADERS)
         )
         data: list[dict[str, Any]] = []
-        clear_ranges: list[str] = []
+        stale_tail_ranges: list[str] = []
         end_col = _column_name(len(CHAIN_HEADERS))
         for scan in targets:
             rows = [CHAIN_HEADERS]
@@ -260,23 +265,28 @@ class SheetsRepository:
                         for header in CHAIN_HEADERS
                     ]
                 )
-            clear_ranges.append(
-                _sheet_range(scan.sheet_name, f"A2:{end_col}{self.max_monitor_rows}")
-            )
+            stale_start = len(rows) + 1
+            if stale_start <= self.max_monitor_rows:
+                stale_tail_ranges.append(
+                    _sheet_range(scan.sheet_name, f"A{stale_start}:{end_col}{self.max_monitor_rows}")
+                )
             data.append(
                 {
                     "range": _sheet_range(scan.sheet_name, f"A1:{end_col}{len(rows)}"),
                     "values": rows,
                 }
             )
-        self.service.spreadsheets().values().batchClear(
-            spreadsheetId=self.spreadsheet_id,
-            body={"ranges": clear_ranges},
-        ).execute()
+        # Write the complete new snapshot first.  If this request fails, the previous
+        # chain remains intact instead of leaving a blank worksheet.
         self.service.spreadsheets().values().batchUpdate(
             spreadsheetId=self.spreadsheet_id,
             body={"valueInputOption": "USER_ENTERED", "data": data},
         ).execute()
+        if stale_tail_ranges:
+            self.service.spreadsheets().values().batchClear(
+                spreadsheetId=self.spreadsheet_id,
+                body={"ranges": stale_tail_ranges},
+            ).execute()
 
     def upsert_close_trend_rows(self, rows: list[dict[str, Any]]) -> None:
         """Write one immutable successful close snapshot per daily snapshot ID.
@@ -310,7 +320,15 @@ class SheetsRepository:
             ).execute()
         else:
             existing_headers = [str(value) for value in header_values[0]]
-            if existing_headers != CLOSE_TREND_HEADERS:
+            if existing_headers == CLOSE_TREND_HEADERS[:-2]:
+                self.service.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=_sheet_range(CLOSE_TREND_SHEET, f"A1:{end_col}1"),
+                    valueInputOption="RAW",
+                    body={"values": [CLOSE_TREND_HEADERS]},
+                ).execute()
+                self._backfill_close_trend_differences()
+            elif existing_headers != CLOSE_TREND_HEADERS:
                 raise RuntimeError("收盤Delta趨勢欄位與目前版本不一致，請先執行初始化／升級系統")
 
         existing_response = (
@@ -373,6 +391,160 @@ class SheetsRepository:
                 body={"values": appends},
             ).execute()
 
+    def append_notification_events(self, events: list[dict[str, Any]]) -> None:
+        if not events:
+            return
+        self._ensure_sheets([NOTIFICATION_QUEUE_SHEET], min_columns=len(NOTIFICATION_QUEUE_HEADERS))
+        self._ensure_header(NOTIFICATION_QUEUE_SHEET, NOTIFICATION_QUEUE_HEADERS)
+        end_col = _column_name(len(NOTIFICATION_QUEUE_HEADERS))
+        existing_response = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=_sheet_range(NOTIFICATION_QUEUE_SHEET, "A2:A"),
+            valueRenderOption="UNFORMATTED_VALUE",
+        ).execute()
+        existing_ids = {str(row[0]) for row in existing_response.get("values", []) if row}
+        rows: list[list[Any]] = []
+        for event in events:
+            event_id = str(event.get("事件ID") or "").strip()
+            if not event_id or event_id in existing_ids:
+                continue
+            existing_ids.add(event_id)
+            values = dict(event)
+            for name in ("失敗掃描", "內容JSON"):
+                if isinstance(values.get(name), (dict, list)):
+                    values[name] = json.dumps(values[name], ensure_ascii=False, separators=(",", ":"))
+            rows.append([self._serializable(values.get(header, ""), header) for header in NOTIFICATION_QUEUE_HEADERS])
+        if rows:
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(NOTIFICATION_QUEUE_SHEET, f"A:{end_col}"),
+                valueInputOption="USER_ENTERED",
+                insertDataOption="INSERT_ROWS",
+                body={"values": rows},
+            ).execute()
+
+    def _backfill_close_trend_differences(self) -> None:
+        response = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=_sheet_range(CLOSE_TREND_SHEET, "L2:P"),
+            valueRenderOption="UNFORMATTED_VALUE",
+        ).execute()
+        updates: list[list[Any]] = []
+        for row in response.get("values", []):
+            strike = row[0] if len(row) > 0 else None
+            spot = row[4] if len(row) > 4 else None
+            try:
+                difference = float(spot) - float(strike)
+                rate = difference / float(spot) if float(spot) != 0 else ""
+                updates.append([difference, rate])
+            except (TypeError, ValueError):
+                updates.append(["", ""])
+        if updates:
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(CLOSE_TREND_SHEET, f"AO2:AP{len(updates) + 1}"),
+                valueInputOption="RAW",
+                body={"values": updates},
+            ).execute()
+
+    def load_close_records(self, market_date: str) -> dict[str, dict[str, Any]]:
+        if not market_date:
+            return {}
+        self._ensure_sheets([CLOSE_ALERT_STATE_SHEET], min_columns=len(CLOSE_ALERT_STATE_HEADERS))
+        self._ensure_header(CLOSE_ALERT_STATE_SHEET, CLOSE_ALERT_STATE_HEADERS)
+        response = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=_sheet_range(CLOSE_ALERT_STATE_SHEET, "A2:J"),
+            valueRenderOption="UNFORMATTED_VALUE",
+            dateTimeRenderOption="FORMATTED_STRING",
+        ).execute()
+        result: dict[str, dict[str, Any]] = {}
+        for row in response.get("values", []):
+            padded = row + [""] * (len(CLOSE_ALERT_STATE_HEADERS) - len(row))
+            mapped = dict(zip(CLOSE_ALERT_STATE_HEADERS, padded))
+            if str(mapped.get("美東交易日")) == market_date:
+                result[str(mapped.get("掃描ID"))] = mapped
+        return result
+
+    def load_previous_close_record(self, scan_id: str, market_date: str) -> dict[str, Any] | None:
+        self._ensure_sheets([CLOSE_ALERT_STATE_SHEET], min_columns=len(CLOSE_ALERT_STATE_HEADERS))
+        self._ensure_header(CLOSE_ALERT_STATE_SHEET, CLOSE_ALERT_STATE_HEADERS)
+        response = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=_sheet_range(CLOSE_ALERT_STATE_SHEET, "A2:J"),
+            valueRenderOption="UNFORMATTED_VALUE",
+            dateTimeRenderOption="FORMATTED_STRING",
+        ).execute()
+        candidates: list[dict[str, Any]] = []
+        for row in response.get("values", []):
+            padded = row + [""] * (len(CLOSE_ALERT_STATE_HEADERS) - len(row))
+            mapped = dict(zip(CLOSE_ALERT_STATE_HEADERS, padded))
+            if (str(mapped.get("掃描ID")) == scan_id and str(mapped.get("狀態")) == "SUCCESS"
+                    and str(mapped.get("美東交易日")) < market_date):
+                candidates.append(mapped)
+        if not candidates:
+            return None
+        latest = max(candidates, key=lambda item: str(item.get("美東交易日")))
+        try:
+            symbols = json.loads(str(latest.get("符合合約JSON") or "[]"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            symbols = []
+        return {"market_date": latest.get("美東交易日"), "fingerprint": latest.get("第一條件指紋"),
+                "symbols": symbols if isinstance(symbols, list) else []}
+
+    def upsert_close_records(self, records: list[dict[str, Any]]) -> None:
+        if not records:
+            return
+        self._ensure_sheets([CLOSE_ALERT_STATE_SHEET], min_columns=len(CLOSE_ALERT_STATE_HEADERS))
+        self._ensure_header(CLOSE_ALERT_STATE_SHEET, CLOSE_ALERT_STATE_HEADERS)
+        response = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=_sheet_range(CLOSE_ALERT_STATE_SHEET, "A2:J"),
+            valueRenderOption="UNFORMATTED_VALUE",
+        ).execute()
+        existing = {
+            str(row[0]): (index, row)
+            for index, row in enumerate(response.get("values", []), start=2)
+            if row
+        }
+        end_col = _column_name(len(CLOSE_ALERT_STATE_HEADERS))
+        updates: list[dict[str, Any]] = []
+        appends: list[list[Any]] = []
+        for record in records:
+            previous = existing.get(str(record.get("record_id")))
+            previous_row = previous[1] if previous else []
+            previous_attempts = 0
+            if len(previous_row) >= len(CLOSE_ALERT_STATE_HEADERS):
+                try:
+                    previous_attempts = int(float(previous_row[CLOSE_ALERT_STATE_HEADERS.index("嘗試次數")]))
+                except (TypeError, ValueError):
+                    previous_attempts = 0
+            mapped = {
+                "記錄ID": record.get("record_id"), "美東交易日": record.get("market_date"),
+                "掃描ID": record.get("scan_id"), "第一條件指紋": record.get("fingerprint"),
+                "狀態": record.get("status"),
+                "符合合約JSON": json.dumps(record.get("symbols", []), ensure_ascii=False, separators=(",", ":")),
+                "最後嘗試時間(UTC)": record.get("attempted_at"), "成功時間(UTC)": record.get("succeeded_at"),
+                "錯誤訊息": record.get("error", ""),
+                "嘗試次數": previous_attempts + 1,
+            }
+            values = [self._serializable(mapped.get(header, ""), header) for header in CLOSE_ALERT_STATE_HEADERS]
+            row_number = previous[0] if previous else None
+            if row_number:
+                updates.append({"range": _sheet_range(CLOSE_ALERT_STATE_SHEET, f"A{row_number}:{end_col}{row_number}"),
+                                "values": [values]})
+            else:
+                appends.append(values)
+        if updates:
+            self.service.spreadsheets().values().batchUpdate(
+                spreadsheetId=self.spreadsheet_id, body={"valueInputOption": "USER_ENTERED", "data": updates}
+            ).execute()
+        if appends:
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id, range=_sheet_range(CLOSE_ALERT_STATE_SHEET, f"A:{end_col}"),
+                valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={"values": appends}
+            ).execute()
+
     def append_system_log(self, level: str, message: str, details: str = "") -> None:
         self.service.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
@@ -390,6 +562,26 @@ class SheetsRepository:
                 ]
             },
         ).execute()
+
+    def _ensure_header(self, sheet_name: str, headers: list[str]) -> None:
+        end_col = _column_name(len(headers))
+        response = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=_sheet_range(sheet_name, f"A1:{end_col}1"),
+            valueRenderOption="UNFORMATTED_VALUE",
+        ).execute()
+        values = response.get("values", [])
+        if not values or not any(values[0]):
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(sheet_name, f"A1:{end_col}1"),
+                valueInputOption="RAW",
+                body={"values": [headers]},
+            ).execute()
+            return
+        existing = [str(value) for value in values[0]]
+        if existing != headers:
+            raise RuntimeError(f"{sheet_name}欄位與目前版本不一致，請先執行初始化／升級系統")
 
     def _ensure_sheets(self, titles: list[str], min_columns: int = 26) -> None:
         metadata = (
@@ -457,3 +649,5 @@ class SheetsRepository:
         if isinstance(value, date):
             return value.isoformat()
         return value
+    NOTIFICATION_QUEUE_HEADERS,
+    NOTIFICATION_QUEUE_SHEET,

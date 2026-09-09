@@ -9,10 +9,10 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_6_2_everywhere(self):
-        self.assertIn("VERSION: '0.6.2'", CODE)
-        self.assertIn('version = "0.6.2"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.6.2"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+    def test_version_is_0_7_0_everywhere(self):
+        self.assertIn("VERSION: '0.7.0'", CODE)
+        self.assertIn('version = "0.7.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.7.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
 
     def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
         self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)
@@ -26,7 +26,7 @@ class AppsScriptAutomationTests(unittest.TestCase):
             re.S,
         )
         self.assertIsNotNone(formatter)
-        self.assertIn('$AF2="持續符合"', formatter.group(1))
+        self.assertIn('REGEXMATCH($A2,"第二")', formatter.group(1))
         self.assertIn("function applyAllChainFormatting_()", CODE)
         setup = re.search(r"function setupSystem\(\) \{(.*?)\n\}", CODE, re.S)
         self.assertIsNotNone(setup)
@@ -118,6 +118,33 @@ class AppsScriptAutomationTests(unittest.TestCase):
         self.assertIn("LAST_EXPIRY_NOTICE_DATE, expiresOn", CODE)
         self.assertIn("91 * 24 * 60 * 60 * 1000", CODE)
         self.assertIn("自動更新已恢復", CODE)
+
+    def test_queue_email_omits_secondary_greeks_and_includes_underlying(self):
+        builder = re.search(r"function buildQueueEmail_\(.*?\n\}", CODE, re.S)
+        self.assertIsNotNone(builder)
+        block = builder.group(0)
+        self.assertIn("標的股價", block)
+        self.assertNotIn("Gamma", block)
+        self.assertNotIn("Theta", block)
+        self.assertNotIn("Vega", block)
+
+    def test_notification_queue_has_retry_states(self):
+        self.assertIn("QUEUE: '通知佇列'", CODE)
+        self.assertIn("'PENDING', 'FAILED'", CODE)
+        self.assertIn("setValue('SENDING')", CODE)
+        self.assertIn("setValue('SENT')", CODE)
+        self.assertIn("重試次數", CODE)
+
+    def test_dispatch_acceptance_is_separate_from_data_completion(self):
+        self.assertIn("等待資料更新完成", CODE)
+        service = (ROOT / "app" / "service.py").read_text(encoding="utf-8")
+        self.assertIn("工作流程完成：資料更新成功", service)
+
+    def test_runtime_chain_write_occurs_before_stale_tail_clear(self):
+        sheets = (ROOT / "app" / "sheets.py").read_text(encoding="utf-8")
+        method = re.search(r"def write_chain_sheets\(.*?\n    def ", sheets, re.S)
+        self.assertIsNotNone(method)
+        self.assertLess(method.group(0).index("values().batchUpdate"), method.group(0).index("values().batchClear"))
 
 
 if __name__ == "__main__":
