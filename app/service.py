@@ -78,9 +78,19 @@ class RefreshService:
             self.repository.append_system_log("ERROR", "市場行事曆失敗", message)
             return {"status": "error", "reason": message}
 
-        capture_close = session.just_closed and not force
-        close_time = resolve_market_close(now=now, market_close=session.market_close,
-                                          market_timezone=market_timezone) if capture_close else None
+        automatic_close = session.just_closed and not force
+        manual_close_candidate = bool(
+            force
+            and not session.is_open
+            and session.market_close is not None
+            and now.astimezone(timezone.utc) > session.market_close.astimezone(timezone.utc)
+        )
+        close_candidate = automatic_close or manual_close_candidate
+        close_time = resolve_market_close(
+            now=now,
+            market_close=session.market_close,
+            market_timezone=market_timezone,
+        ) if close_candidate else None
         if not force and not (session.is_open or session.just_closed):
             return self._skip("非期權開盤或收盤更新時點", now, None)
 
@@ -101,9 +111,14 @@ class RefreshService:
             return self._skip("沒有啟用的掃描", now, None)
 
         market_date = close_time.astimezone(ZoneInfo(market_timezone)).date().isoformat() if close_time else ""
-        close_existing, previous_closes = self._load_close_history(market_date) if capture_close else ({}, {})
-        if capture_close and all(close_existing.get(scan.scan_id, {}).get("狀態") == "SUCCESS" for scan in active):
+        close_existing, previous_closes = self._load_close_history(market_date) if close_candidate else ({}, {})
+        close_already_complete = bool(close_candidate) and all(
+            close_existing.get(scan.scan_id, {}).get("狀態") == "SUCCESS" for scan in active
+        )
+        if automatic_close and close_already_complete:
             return self._skip("本交易日收盤更新已完整完成", now, None)
+        capture_close = close_candidate and not close_already_complete
+        manual_close_recovery = capture_close and manual_close_candidate
         first_close_attempt = capture_close and not close_existing
 
         previous_states = self.repository.load_chain_states(active)
@@ -133,7 +148,9 @@ class RefreshService:
                         "事件類型": "FIRST_CLOSE", "狀態": "PENDING", "建立時間(UTC)": now,
                         "美東交易日": market_date, "是否完整": False,
                         "失敗掃描": [scan.scan_id for scan in pending_close],
-                        "內容JSON": {"market_date": market_date, "groups": [],
+                        "內容JSON": {"market_date": market_date,
+                                       "capture_mode": "manual_recovery" if manual_close_recovery else "scheduled_close",
+                                       "groups": [],
                                        "failed_scans": [scan.scan_id for scan in pending_close], "complete": False}}])
                 self._upsert_close_records(records)
                 trend_rows = build_close_trend_rows(scans=active, chain_rows={}, scan_updates=failure_updates,
@@ -340,6 +357,7 @@ class RefreshService:
                     "狀態": "PENDING", "建立時間(UTC)": now, "美東交易日": market_date,
                     "是否完整": not close_failures, "失敗掃描": [scan.scan_id for scan in close_failures],
                     "內容JSON": {"market_date": market_date, "snapshot_version": 2,
+                                   "capture_mode": "manual_recovery" if manual_close_recovery else "scheduled_close",
                                    "groups": selected_groups,
                                    "failed_scans": [scan.scan_id for scan in close_failures],
                                    "complete": not close_failures},
@@ -376,7 +394,9 @@ class RefreshService:
         self.repository.update_settings(settings_update)
         details = {"scans": success_count, "active_scans": len(active), "contracts": contract_count,
                    "errors": error_count, "invalid_rows": invalid_rows, "market_open": session.is_open,
-                   "close_update": session.just_closed, "close_complete": capture_close and not (close_failures if capture_close else []),
+                   "close_update": capture_close,
+                   "close_recovery": manual_close_recovery,
+                   "close_complete": capture_close and not (close_failures if capture_close else []),
                    "close_trend_rows": close_trend_count, "queued_events": len(realtime_events),
                    "risk_free_rate": risk_free_rate, "risk_free_rate_source": rate_source}
         self.repository.append_system_log("INFO" if complete else "WARN", status, json.dumps(details, ensure_ascii=False))

@@ -9,18 +9,19 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_7_2_everywhere(self):
-        self.assertIn("VERSION: '0.7.2'", CODE)
-        self.assertIn('version = "0.7.2"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.7.2"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
-        self.assertIn('["系統版本", "0.7.2", "目前規格版本"]',
+    def test_version_is_0_7_3_everywhere(self):
+        self.assertIn("VERSION: '0.7.3'", CODE)
+        self.assertIn('version = "0.7.3"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.7.3"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+        self.assertIn('["系統版本", "0.7.3", "目前規格版本"]',
                       (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8"))
-        self.assertIn('目前版本：`0.7.2`', (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('目前版本：`0.7.3`', (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
         self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)
         self.assertIn("normalizeUserFacingTimestamps_();", CODE)
         self.assertIn("function parseIsoTimestamp_(value)", CODE)
+        self.assertIn("normalizeTimestampColumns_(alerts, ['紀錄時間'])", CODE)
 
     def test_continuing_matches_stay_green(self):
         formatter = re.search(
@@ -148,7 +149,7 @@ class AppsScriptAutomationTests(unittest.TestCase):
         self.assertIn("'紀錄ID'", CODE)
         processor = re.search(r"function processPendingEmails\(\) \{(.*?)\n\}", CODE, re.S)
         self.assertIsNotNone(processor)
-        self.assertIn("reconcileSentAlertLogs_();", processor.group(1))
+        self.assertIn("reconcileAlertLogs_();", processor.group(1))
 
     def test_realtime_alert_log_uses_complete_snapshot_and_self_repairs(self):
         service = (ROOT / "app" / "service.py").read_text(encoding="utf-8")
@@ -160,6 +161,24 @@ class AppsScriptAutomationTests(unittest.TestCase):
         self.assertIn("'歷史事件僅保存已通知項目'", CODE)
         self.assertIn(".addItem('重建警示紀錄', 'rebuildAlertLog')", CODE)
         self.assertIn("function rebuildAlertLog()", CODE)
+
+    def test_current_matches_are_reconciled_independently_from_email_events(self):
+        self.assertIn("function reconcileCurrentMatchLogs_(force)", CODE)
+        self.assertIn("function replaceCurrentMatchAlertLogRows_(desiredRows)", CODE)
+        self.assertIn("'CURRENT_FIRST'", CODE)
+        self.assertIn("'CURRENT_SECOND'", CODE)
+        self.assertIn("'最新成功快照'", CODE)
+        self.assertIn("reconcileAlertLogs_(true)", CODE)
+        self.assertIn("CURRENT_MATCH_TOKEN", CODE)
+        self.assertIn("CURRENT_MATCH_COUNT", CODE)
+        self.assertIn("function countCurrentMatchAlertLogRows_()", CODE)
+        self.assertIn("'紀錄時間'", CODE)
+
+    def test_manual_close_recovery_is_identified_in_alert_log(self):
+        service = (ROOT / "app" / "service.py").read_text(encoding="utf-8")
+        self.assertIn('"capture_mode": "manual_recovery" if manual_close_recovery else "scheduled_close"', service)
+        self.assertIn("payload.capture_mode === 'manual_recovery'", CODE)
+        self.assertIn("'完整（延後補抓）'", CODE)
 
     def test_close_history_uses_one_batch_load_and_retries_sheets_429(self):
         service = (ROOT / "app" / "service.py").read_text(encoding="utf-8")

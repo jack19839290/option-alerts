@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.7.2',
+  VERSION: '0.7.3',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -28,6 +28,8 @@ const APP = Object.freeze({
     FAILURE_ACTIVE: 'GITHUB_FAILURE_ACTIVE',
     LAST_FAILURE_NOTICE_AT: 'GITHUB_LAST_FAILURE_NOTICE_AT',
     LAST_EXPIRY_NOTICE_DATE: 'GITHUB_LAST_EXPIRY_NOTICE_DATE',
+    CURRENT_MATCH_TOKEN: 'ALERT_LOG_CURRENT_MATCH_TOKEN',
+    CURRENT_MATCH_COUNT: 'ALERT_LOG_CURRENT_MATCH_COUNT',
   },
   SCAN_HEADERS: [
     '啟用', '掃描ID', '股票代號', '到期日', '顯示類型',
@@ -50,7 +52,7 @@ const APP = Object.freeze({
     '第二可再次通知', '第二連續有效不符合', '第二通知序號', '資料狀態'
   ],
   ALERT_HEADERS: [
-    '寄送時間', '掃描ID', '股票代號', '到期日', '類型', '履約價', 'Bid', 'Delta估算',
+    '紀錄時間', '掃描ID', '股票代號', '到期日', '類型', '履約價', 'Bid', 'Delta估算',
     '標的股價', '年化報酬率', '未平倉', 'DTE', '合約代號', '收件信箱', '寄送狀態',
     'Ask', 'Bid-Ask價差率', '事件ID', '事件類型', '門檻', '今日新增', '事件完整性',
     '失敗掃描', '紀錄ID'
@@ -193,7 +195,7 @@ function setupSystem() {
   installAutomationTriggers_();
   normalizeUserFacingTimestamps_();
   try {
-    reconcileSentAlertLogs_();
+    reconcileAlertLogs_(true);
   } catch (error) {
     appendSystemLog_('WARNING', '警示紀錄補登失敗', String(error.message || error).slice(0, 1000));
   }
@@ -219,7 +221,7 @@ function prepareNextRefresh_() {
 
 function rebuildAlertLog() {
   ensureSystemSheets_();
-  const restored = reconcileSentAlertLogs_();
+  const restored = reconcileAlertLogs_(true);
   applyAlertLogFormatting_();
   getSpreadsheet_().toast(`警示紀錄重建完成，本次補回／修復 ${restored} 筆`, '選擇權警示', 7);
   return restored;
@@ -233,9 +235,20 @@ function processPendingEmails() {
     const recipient = String(settings['通知信箱'] || '').trim();
     const spreadsheet = getSpreadsheet_();
     const queue = spreadsheet.getSheetByName(APP.SHEETS.QUEUE);
-    if (!queue || queue.getLastRow() < 2) return;
+    if (!queue || queue.getLastRow() < 2) {
+      try {
+        reconcileCurrentMatchLogs_();
+      } catch (error) {
+        appendSystemLog_('WARNING', '目前符合名單更新失敗', String(error.message || error).slice(0, 1000));
+      }
+      return;
+    }
     if (!recipient) {
-      reconcileSentAlertLogs_();
+      try {
+        reconcileAlertLogs_();
+      } catch (error) {
+        appendSystemLog_('WARNING', '警示紀錄補登失敗', String(error.message || error).slice(0, 1000));
+      }
       return;
     }
     const values = queue.getDataRange().getValues();
@@ -274,7 +287,7 @@ function processPendingEmails() {
       }
     }
     try {
-      reconcileSentAlertLogs_();
+      reconcileAlertLogs_();
     } catch (error) {
       appendSystemLog_('WARNING', '警示紀錄補登失敗', String(error.message || error).slice(0, 1000));
     }
@@ -321,7 +334,9 @@ function alertRecordId_(eventId, scanId, contractSymbol, summarySuffix) {
 function buildAlertLogRowsForEvent_(eventId, eventType, payload, recipient, sentAt) {
   const groups = Array.isArray(payload.groups) ? payload.groups : [];
   const threshold = alertThresholdLabel_(eventType);
-  const completeness = payload.complete === false ? '資料不完整' : '完整';
+  const completeness = payload.complete === false
+    ? '資料不完整'
+    : (payload.capture_mode === 'manual_recovery' ? '完整（延後補抓）' : '完整');
   const failedScans = Array.isArray(payload.failed_scans) ? payload.failed_scans.join('、') : '';
   const rows = [];
   groups.forEach(group => {
@@ -460,6 +475,143 @@ function reconcileSentAlertLogs_() {
     }
   });
   return upsertAlertLogRows_(desiredRows);
+}
+
+function sheetBoolean_(value) {
+  if (value === true) return true;
+  return ['TRUE', '1', '是', '啟用'].includes(String(value || '').trim().toUpperCase());
+}
+
+function snapshotTokenValue_(value) {
+  if (value instanceof Date) return String(value.getTime());
+  return String(value === null || value === undefined ? '' : value).trim();
+}
+
+function currentMatchRecordId_(threshold, scanId, contractSymbol) {
+  return ['CURRENT', threshold, scanId || 'NO_SCAN', contractSymbol || 'NO_CONTRACT'].join('|');
+}
+
+function buildCurrentMatchLogRow_(scan, chainRow, chainMap, threshold, recipient) {
+  const value = name => chainMap[name] === undefined ? '' : chainRow[chainMap[name]];
+  const thresholdLabel = threshold === 'FIRST' ? '第一門檻' : '第二門檻';
+  const eventType = threshold === 'FIRST' ? 'CURRENT_FIRST' : 'CURRENT_SECOND';
+  const contractSymbol = String(value('合約代號') || '').trim();
+  const emailEnabled = sheetBoolean_(scan.emailEnabled);
+  return [
+    value('最後抓取時間') || scan.lastSuccess || '', scan.scanId, scan.ticker, scan.expiry,
+    value('類型'), value('履約價'), value('Bid'), value('Delta估算'), value('標的股價'),
+    value('年化報酬率'), value('未平倉'), value('DTE'), contractSymbol,
+    emailEnabled ? recipient : '', `目前符合（${thresholdLabel}${emailEnabled ? '' : '，未啟用Email'}）`,
+    value('Ask'), value('Bid-Ask價差率'), `CURRENT|${threshold}|${scan.scanId}`, eventType,
+    thresholdLabel, '', '最新成功快照', '', currentMatchRecordId_(threshold, scan.scanId, contractSymbol),
+  ];
+}
+
+function replaceCurrentMatchAlertLogRows_(desiredRows) {
+  const log = ensureAlertLogSheet_();
+  const eventTypeIndex = APP.ALERT_HEADERS.indexOf('事件類型');
+  let removed = 0;
+  if (log.getLastRow() >= 2) {
+    const existing = log.getRange(2, 1, log.getLastRow() - 1, APP.ALERT_HEADERS.length).getValues();
+    const currentRows = [];
+    existing.forEach((row, offset) => {
+      if (String(row[eventTypeIndex] || '').indexOf('CURRENT_') === 0) currentRows.push(offset + 2);
+    });
+    for (let index = currentRows.length - 1; index >= 0; index -= 1) {
+      log.deleteRow(currentRows[index]);
+      removed += 1;
+    }
+  }
+  if (desiredRows.length) {
+    log.insertRowsAfter(1, desiredRows.length);
+    log.getRange(2, 1, desiredRows.length, APP.ALERT_HEADERS.length).setValues(desiredRows);
+  }
+  return removed + desiredRows.length;
+}
+
+function countCurrentMatchAlertLogRows_() {
+  const log = ensureAlertLogSheet_();
+  if (log.getLastRow() < 2) return 0;
+  const eventTypeColumn = APP.ALERT_HEADERS.indexOf('事件類型') + 1;
+  return log.getRange(2, eventTypeColumn, log.getLastRow() - 1, 1).getValues()
+    .reduce((count, row) => count + (String(row[0] || '').indexOf('CURRENT_') === 0 ? 1 : 0), 0);
+}
+
+function reconcileCurrentMatchLogs_(force) {
+  const spreadsheet = getSpreadsheet_();
+  const scansSheet = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
+  if (!scansSheet || scansSheet.getLastRow() < 2) return replaceCurrentMatchAlertLogRows_([]);
+  const scanValues = scansSheet.getDataRange().getValues();
+  const scanMap = Object.fromEntries(scanValues[0].map((header, index) => [String(header), index]));
+  const requiredScanHeaders = ['啟用', '掃描ID', '股票代號', '到期日', '工作表', 'Email通知',
+    '最後成功抓取時間', '合約數', '第一條件指紋', '第二條件指紋'];
+  const missingScanHeaders = requiredScanHeaders.filter(header => scanMap[header] === undefined);
+  if (missingScanHeaders.length) throw new Error(`掃描設定缺少欄位：${missingScanHeaders.join('、')}`);
+  const active = scanValues.slice(1).filter(row => sheetBoolean_(row[scanMap['啟用']])
+    && String(row[scanMap['掃描ID']] || '').trim()
+    && String(row[scanMap['工作表']] || '').trim()
+    && row[scanMap['最後成功抓取時間']] !== '');
+  const token = active.map(row => [
+    row[scanMap['掃描ID']], row[scanMap['工作表']], snapshotTokenValue_(row[scanMap['最後成功抓取時間']]),
+    row[scanMap['合約數']], row[scanMap['第一條件指紋']], row[scanMap['第二條件指紋']],
+  ].join('\u001f')).sort().join('\u001e') || 'NO_ACTIVE_SNAPSHOT';
+  const properties = PropertiesService.getScriptProperties();
+  const expectedCurrentCount = Number(properties.getProperty(APP.PROPERTIES.CURRENT_MATCH_COUNT) || -1);
+  if (!force && properties.getProperty(APP.PROPERTIES.CURRENT_MATCH_TOKEN) === token
+      && countCurrentMatchAlertLogRows_() === expectedCurrentCount) return 0;
+
+  const recipient = String(getSettings_()['通知信箱'] || '').trim();
+  const desired = [];
+  active.forEach(scanRow => {
+    const scan = {
+      scanId: String(scanRow[scanMap['掃描ID']] || '').trim(),
+      ticker: String(scanRow[scanMap['股票代號']] || '').trim(),
+      expiry: scanRow[scanMap['到期日']] || '',
+      sheetName: String(scanRow[scanMap['工作表']] || '').trim(),
+      emailEnabled: scanRow[scanMap['Email通知']],
+      lastSuccess: scanRow[scanMap['最後成功抓取時間']],
+      contractCount: Number(scanRow[scanMap['合約數']] || 0),
+    };
+    const chain = spreadsheet.getSheetByName(scan.sheetName);
+    if (!chain) throw new Error(`找不到期權鍊工作表：${scan.sheetName}`);
+    const chainValues = chain.getDataRange().getValues();
+    if (!chainValues.length) throw new Error(`期權鍊工作表沒有標題列：${scan.sheetName}`);
+    const chainMap = Object.fromEntries(chainValues[0].map((header, index) => [String(header), index]));
+    const requiredChainHeaders = ['第一門檻結果', '第二門檻結果', '類型', '履約價', '標的股價',
+      'Bid', '年化報酬率', 'Delta估算', 'Bid-Ask價差率', '未平倉', 'DTE', '最後抓取時間',
+      'Ask', '合約代號', '掃描ID'];
+    const missingChainHeaders = requiredChainHeaders.filter(header => chainMap[header] === undefined);
+    if (missingChainHeaders.length) throw new Error(`${scan.sheetName} 缺少欄位：${missingChainHeaders.join('、')}`);
+    const rows = chainValues.slice(1).filter(row => String(row[chainMap['掃描ID']] || '').trim() === scan.scanId);
+    if (scan.contractCount > 0 && !rows.length) throw new Error(`${scan.sheetName} 尚未完成本次期權鍊寫入`);
+    if (rows.length && snapshotTokenValue_(rows[0][chainMap['最後抓取時間']])
+        !== snapshotTokenValue_(scan.lastSuccess)) {
+      throw new Error(`${scan.sheetName} 的期權鍊仍在更新，稍後自動重試`);
+    }
+    rows.forEach(row => {
+      const symbol = String(row[chainMap['合約代號']] || '').trim();
+      if (!symbol) return;
+      if (String(row[chainMap['第一門檻結果']] || '') === '符合') {
+        desired.push(buildCurrentMatchLogRow_(scan, row, chainMap, 'FIRST', recipient));
+      }
+      if (String(row[chainMap['第二門檻結果']] || '') === '符合') {
+        desired.push(buildCurrentMatchLogRow_(scan, row, chainMap, 'SECOND', recipient));
+      }
+    });
+  });
+  desired.sort((left, right) => String(left[2]).localeCompare(String(right[2]))
+    || snapshotTokenValue_(left[3]).localeCompare(snapshotTokenValue_(right[3]))
+    || String(left[19]).localeCompare(String(right[19]))
+    || String(left[4]).localeCompare(String(right[4]))
+    || Number(left[5] || 0) - Number(right[5] || 0));
+  const changed = replaceCurrentMatchAlertLogRows_(desired);
+  properties.setProperty(APP.PROPERTIES.CURRENT_MATCH_TOKEN, token);
+  properties.setProperty(APP.PROPERTIES.CURRENT_MATCH_COUNT, String(desired.length));
+  return changed;
+}
+
+function reconcileAlertLogs_(forceCurrent) {
+  return reconcileSentAlertLogs_() + reconcileCurrentMatchLogs_(Boolean(forceCurrent));
 }
 
 function validateScanInput_(payload) {
@@ -633,7 +785,7 @@ function migrateAlertLogSchema070_(spreadsheet) {
   if (!sheet || sheet.getLastColumn() < 1) return;
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   if (headers.slice(0, APP.ALERT_HEADERS.length).join('\u001f') === APP.ALERT_HEADERS.join('\u001f')) return;
-  if (!headers.includes('寄送時間') || !headers.includes('合約代號')) return;
+  if ((!headers.includes('寄送時間') && !headers.includes('紀錄時間')) || !headers.includes('合約代號')) return;
   const values = sheet.getLastRow() >= 2 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues() : [];
   const index = Object.fromEntries(headers.map((header, position) => [header, position]));
   const migrated = values.map((row, rowIndex) => {
@@ -643,6 +795,7 @@ function migrateAlertLogSchema070_(spreadsheet) {
     const scanId = oldValue('掃描ID');
     const contractSymbol = oldValue('合約代號');
     return APP.ALERT_HEADERS.map(header => {
+      if (header === '紀錄時間') return oldValue('紀錄時間') || oldValue('寄送時間');
       if (header === '事件類型') return eventType;
       if (header === '事件ID' || header === '標的股價') return oldValue(header);
       if (header === '門檻') return alertThresholdLabel_(eventType);
@@ -1054,7 +1207,7 @@ function normalizeUserFacingTimestamps_() {
   if (scans) normalizeTimestampColumns_(scans, ['最後嘗試時間', '最後成功抓取時間']);
 
   const alerts = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
-  if (alerts) normalizeTimestampColumns_(alerts, ['寄送時間']);
+  if (alerts) normalizeTimestampColumns_(alerts, ['紀錄時間']);
 
   const closeTrends = spreadsheet.getSheetByName(APP.SHEETS.CLOSE_TRENDS);
   if (closeTrends) normalizeTimestampColumns_(closeTrends, ['最後成交時間']);

@@ -189,15 +189,31 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["close_trend_rows"], 6)
         self.assertEqual(len(repository.close_trend_updates), 6)
 
-    def test_manual_refresh_during_close_window_does_not_write_close_trend(self):
+    def test_manual_refresh_after_failed_close_recovers_close_snapshot(self):
         scan = make_scan()
         repository = FakeRepository([scan])
-        now = datetime(2026, 8, 27, 20, 45, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 28, 3, 45, tzinfo=timezone.utc)
         result = RefreshService(repository, FakeProvider()).refresh(force=True, now=now)
         self.assertEqual(result["status"], "成功")
-        self.assertEqual(result["close_update"], True)
+        self.assertTrue(result["close_update"])
+        self.assertTrue(result["close_recovery"])
+        self.assertEqual(result["close_trend_rows"], 6)
+        self.assertEqual(repository.notification_events[0]["事件類型"], "FIRST_CLOSE")
+        self.assertEqual(repository.notification_events[0]["內容JSON"]["capture_mode"], "manual_recovery")
+
+    def test_manual_refresh_after_completed_close_does_not_duplicate_close_event(self):
+        scan = make_scan()
+        repository = FakeRepository([scan])
+        repository.close_records["2026-08-27"] = {scan.scan_id: {"狀態": "SUCCESS"}}
+        now = datetime(2026, 8, 28, 3, 45, tzinfo=timezone.utc)
+
+        result = RefreshService(repository, FakeProvider()).refresh(force=True, now=now)
+
+        self.assertEqual(result["status"], "成功")
+        self.assertFalse(result["close_update"])
+        self.assertFalse(result["close_recovery"])
         self.assertEqual(result["close_trend_rows"], 0)
-        self.assertEqual(repository.close_trend_updates, [])
+        self.assertEqual(repository.notification_events, [])
 
     def test_close_dispatch_is_written_only_once(self):
         scan = make_scan()
@@ -316,6 +332,7 @@ class ServiceTests(unittest.TestCase):
         event = repository.notification_events[0]
         self.assertEqual(event["事件類型"], "FIRST_CLOSE")
         self.assertEqual(event["內容JSON"]["groups"][0]["items"], [])
+        self.assertEqual(event["內容JSON"]["capture_mode"], "scheduled_close")
 
     def test_close_marks_new_contract_against_previous_valid_close(self):
         scan = make_scan()
