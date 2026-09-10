@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.7.1',
+  VERSION: '0.7.2',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -78,6 +78,7 @@ function onOpen() {
     .addItem('立即手動更新', 'runManualRefresh')
     .addItem('設定 GitHub 自動更新金鑰', 'showGitHubSetupDialog')
     .addSeparator()
+    .addItem('重建警示紀錄', 'rebuildAlertLog')
     .addItem('初始化／升級系統', 'setupSystem')
     .addToUi();
 }
@@ -216,17 +217,27 @@ function prepareNextRefresh_() {
   });
 }
 
+function rebuildAlertLog() {
+  ensureSystemSheets_();
+  const restored = reconcileSentAlertLogs_();
+  applyAlertLogFormatting_();
+  getSpreadsheet_().toast(`警示紀錄重建完成，本次補回／修復 ${restored} 筆`, '選擇權警示', 7);
+  return restored;
+}
+
 function processPendingEmails() {
   const lock = LockService.getDocumentLock();
   if (!lock.tryLock(25000)) return;
   try {
     const settings = getSettings_();
     const recipient = String(settings['通知信箱'] || '').trim();
-    if (!recipient) return;
-
     const spreadsheet = getSpreadsheet_();
     const queue = spreadsheet.getSheetByName(APP.SHEETS.QUEUE);
     if (!queue || queue.getLastRow() < 2) return;
+    if (!recipient) {
+      reconcileSentAlertLogs_();
+      return;
+    }
     const values = queue.getDataRange().getValues();
     const map = Object.fromEntries(values[0].map((header, index) => [header, index]));
     const now = new Date();
@@ -314,23 +325,36 @@ function buildAlertLogRowsForEvent_(eventId, eventType, payload, recipient, sent
   const failedScans = Array.isArray(payload.failed_scans) ? payload.failed_scans.join('、') : '';
   const rows = [];
   groups.forEach(group => {
-    const items = Array.isArray(group.items) ? group.items : [];
+    const deliveredItems = Array.isArray(group.items) ? group.items : [];
+    const hasCompleteSnapshot = Array.isArray(group.all_matching_items);
+    const items = hasCompleteSnapshot ? group.all_matching_items : deliveredItems;
+    const deliveredSymbols = new Set(deliveredItems.map(item => String(item.contract_symbol || '')));
+    const groupCompleteness = completeness !== '完整'
+      ? completeness
+      : (threshold === '第二門檻' && !hasCompleteSnapshot ? '歷史事件僅保存已通知項目' : '完整');
     if (!items.length) {
       rows.push([
         sentAt, group.scan_id || '', group.ticker || '', group.expiry || '', '', '', '', '', '', '', '', '', '',
-        recipient, '已寄送（0筆符合）', '', '', eventId || '', eventType || '', threshold, '', completeness,
+        recipient, '已寄送（0筆符合）', '', '', eventId || '', eventType || '', threshold, '', groupCompleteness,
         failedScans, alertRecordId_(eventId, group.scan_id, '', 'NO_MATCH')
       ]);
       return;
     }
-    items.forEach(item => rows.push([
-      sentAt, group.scan_id || '', group.ticker || '', group.expiry || '', item.option_type || '',
-      item.strike ?? '', item.bid ?? '', item.delta ?? '', item.underlying_price ?? '', item.annual_return ?? '',
-      item.open_interest ?? '', item.dte ?? '', item.contract_symbol || '', recipient, '已寄送', item.ask ?? '',
-      item.spread_rate ?? '', eventId || '', eventType || '', threshold,
-      threshold === '第一門檻' ? (item.is_new ? '是' : '否') : '', completeness, failedScans,
-      alertRecordId_(eventId, group.scan_id, item.contract_symbol, 'NO_MATCH')
-    ]));
+    items.forEach(item => {
+      const triggeredNow = threshold !== '第二門檻'
+        || deliveredSymbols.has(String(item.contract_symbol || ''));
+      const deliveryStatus = threshold === '第二門檻'
+        ? (triggeredNow ? '已寄送（本次新增）' : '持續符合（未重複寄信）')
+        : '已寄送';
+      rows.push([
+        sentAt, group.scan_id || '', group.ticker || '', group.expiry || '', item.option_type || '',
+        item.strike ?? '', item.bid ?? '', item.delta ?? '', item.underlying_price ?? '', item.annual_return ?? '',
+        item.open_interest ?? '', item.dte ?? '', item.contract_symbol || '', recipient, deliveryStatus, item.ask ?? '',
+        item.spread_rate ?? '', eventId || '', eventType || '', threshold,
+        threshold === '第一門檻' ? (item.is_new ? '是' : '否') : '', groupCompleteness, failedScans,
+        alertRecordId_(eventId, group.scan_id, item.contract_symbol, 'NO_MATCH')
+      ]);
+    });
   });
   if (!rows.length) {
     rows.push([
@@ -342,10 +366,39 @@ function buildAlertLogRowsForEvent_(eventId, eventType, payload, recipient, sent
   return rows;
 }
 
+function ensureAlertLogSheet_() {
+  const spreadsheet = getSpreadsheet_();
+  let log = spreadsheet.getSheetByName(APP.SHEETS.ALERTS);
+  let repaired = false;
+  if (!log) {
+    log = spreadsheet.insertSheet(APP.SHEETS.ALERTS);
+    repaired = true;
+  }
+  if (log.getMaxColumns() < APP.ALERT_HEADERS.length) {
+    log.insertColumnsAfter(log.getMaxColumns(), APP.ALERT_HEADERS.length - log.getMaxColumns());
+    repaired = true;
+  }
+  let headers = log.getRange(1, 1, 1, APP.ALERT_HEADERS.length).getValues()[0].map(String);
+  if (headers.join('\u001f') !== APP.ALERT_HEADERS.join('\u001f')) {
+    if (headers.every(value => !value)) {
+      log.getRange(1, 1, 1, APP.ALERT_HEADERS.length).setValues([APP.ALERT_HEADERS]);
+      repaired = true;
+    } else {
+      migrateAlertLogSchema070_(spreadsheet);
+      headers = log.getRange(1, 1, 1, APP.ALERT_HEADERS.length).getValues()[0].map(String);
+      if (headers.join('\u001f') !== APP.ALERT_HEADERS.join('\u001f')) {
+        throw new Error('警示紀錄欄位與目前版本不一致，請先執行初始化／升級系統');
+      }
+      repaired = true;
+    }
+  }
+  if (repaired) applyAlertLogFormatting_();
+  return log;
+}
+
 function upsertAlertLogRows_(rows) {
   if (!rows.length) return 0;
-  const log = getSpreadsheet_().getSheetByName(APP.SHEETS.ALERTS);
-  if (!log) return 0;
+  const log = ensureAlertLogSheet_();
   const idIndex = APP.ALERT_HEADERS.indexOf('紀錄ID');
   const existing = new Map();
   if (log.getLastRow() >= 2) {
@@ -358,6 +411,7 @@ function upsertAlertLogRows_(rows) {
   const thresholdIndex = APP.ALERT_HEADERS.indexOf('門檻');
   const completenessIndex = APP.ALERT_HEADERS.indexOf('事件完整性');
   const todayNewIndex = APP.ALERT_HEADERS.indexOf('今日新增');
+  const deliveryStatusIndex = APP.ALERT_HEADERS.indexOf('寄送狀態');
   const appendRows = [];
   let changed = 0;
   rows.forEach(row => {
@@ -370,6 +424,8 @@ function upsertAlertLogRows_(rows) {
       return;
     }
     const needsRepair = !prior.values[thresholdIndex] || !prior.values[completenessIndex]
+      || prior.values[deliveryStatusIndex] !== row[deliveryStatusIndex]
+      || prior.values[completenessIndex] !== row[completenessIndex]
       || (row[todayNewIndex] && prior.values[todayNewIndex] !== row[todayNewIndex]);
     if (needsRepair && prior.rowNumber) {
       log.getRange(prior.rowNumber, 1, 1, APP.ALERT_HEADERS.length).setValues([row]);

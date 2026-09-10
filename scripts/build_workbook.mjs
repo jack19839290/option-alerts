@@ -297,7 +297,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.7.1", "目前規格版本"],
+  ["系統版本", "0.7.2", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
@@ -324,9 +324,10 @@ settings.freezePanes.freezeRows(1);
 // 日誌
 alertLog.getRange("A1:X1").values = [alertHeaders];
 alertLog.getRange("A1:X1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
-alertLog.getRange("A2:X4").values = [
+alertLog.getRange("A2:X5").values = [
   [new Date("2026-09-09T20:05:00+08:00"), "MU|2027-01-15", "MU", new Date("2027-01-15T12:00:00Z"), "PUT", 55, 3.8, -0.25, 60, 0.18, 350, 100, "MU270115P00055000", "alerts@example.com", "已寄送", 4.2, 0.10, "CLOSE|2026-09-09|INITIAL", "FIRST_CLOSE", "第一門檻", "是", "完整", "", "CLOSE|2026-09-09|INITIAL|MU|2027-01-15|MU270115P00055000"],
-  [new Date("2026-09-09T21:02:00+08:00"), "MU|2027-01-15", "MU", new Date("2027-01-15T12:00:00Z"), "PUT", 55, 3.9, -0.25, 60.2, 0.185, 355, 100, "MU270115P00055000", "alerts@example.com", "已寄送", 4.3, 0.0976, "RT|MU|2027-01-15|2", "SECOND_REALTIME", "第二門檻", "", "完整", "", "RT|MU|2027-01-15|2|MU|2027-01-15|MU270115P00055000"],
+  [new Date("2026-09-09T21:02:00+08:00"), "MU|2027-01-15", "MU", new Date("2027-01-15T12:00:00Z"), "PUT", 55, 3.9, -0.25, 60.2, 0.185, 355, 100, "MU270115P00055000", "alerts@example.com", "已寄送（本次新增）", 4.3, 0.0976, "RT|MU|2027-01-15|2", "SECOND_REALTIME", "第二門檻", "", "完整", "", "RT|MU|2027-01-15|2|MU|2027-01-15|MU270115P00055000"],
+  [new Date("2026-09-09T21:02:00+08:00"), "MU|2027-01-15", "MU", new Date("2027-01-15T12:00:00Z"), "CALL", 65, 2.1, 0.28, 60.2, 0.128, 420, 100, "MU270115C00065000", "alerts@example.com", "持續符合（未重複寄信）", 2.3, 0.091, "RT|MU|2027-01-15|2", "SECOND_REALTIME", "第二門檻", "", "完整", "", "RT|MU|2027-01-15|2|MU|2027-01-15|MU270115C00065000"],
   [new Date("2026-09-10T20:05:00+08:00"), "NVDA|2027-03-19", "NVDA", new Date("2027-03-19T12:00:00Z"), "", "", "", "", "", "", "", "", "", "alerts@example.com", "已寄送（0筆符合）", "", "", "CLOSE|2026-09-10|INITIAL", "FIRST_CLOSE", "第一門檻", "", "完整", "", "CLOSE|2026-09-10|INITIAL|NVDA|2027-03-19|NO_MATCH"],
 ];
 alertLog.getRange("A:B").format.columnWidthPx = 180;
@@ -334,8 +335,8 @@ alertLog.getRange("C:L").format.columnWidthPx = 105;
 alertLog.getRange("M:M").format.columnWidthPx = 190;
 alertLog.getRange("N:N").format.columnWidthPx = 230;
 alertLog.getRange("O:O").format.columnWidthPx = 100;
-alertLog.getRange("A2:A4").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
-alertLog.getRange("D2:D4").format.numberFormat = "yyyy-mm-dd";
+alertLog.getRange("A2:A5").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
+alertLog.getRange("D2:D5").format.numberFormat = "yyyy-mm-dd";
 alertLog.getRange("J:J").format.numberFormat = "0.00%";
 alertLog.getRange("Q:Q").format.numberFormat = "0.00%";
 alertLog.getRange("R:R").format.columnWidthPx = 260;

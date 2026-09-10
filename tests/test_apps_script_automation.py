@@ -9,13 +9,13 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_7_1_everywhere(self):
-        self.assertIn("VERSION: '0.7.1'", CODE)
-        self.assertIn('version = "0.7.1"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.7.1"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
-        self.assertIn('["系統版本", "0.7.1", "目前規格版本"]',
+    def test_version_is_0_7_2_everywhere(self):
+        self.assertIn("VERSION: '0.7.2'", CODE)
+        self.assertIn('version = "0.7.2"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.7.2"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+        self.assertIn('["系統版本", "0.7.2", "目前規格版本"]',
                       (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8"))
-        self.assertIn('目前版本：`0.7.1`', (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('目前版本：`0.7.2`', (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
         self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)
@@ -149,6 +149,25 @@ class AppsScriptAutomationTests(unittest.TestCase):
         processor = re.search(r"function processPendingEmails\(\) \{(.*?)\n\}", CODE, re.S)
         self.assertIsNotNone(processor)
         self.assertIn("reconcileSentAlertLogs_();", processor.group(1))
+
+    def test_realtime_alert_log_uses_complete_snapshot_and_self_repairs(self):
+        service = (ROOT / "app" / "service.py").read_text(encoding="utf-8")
+        self.assertIn('"all_matching_items": all_realtime_matches', service)
+        self.assertIn("group.all_matching_items", CODE)
+        self.assertIn("'持續符合（未重複寄信）'", CODE)
+        self.assertIn("function ensureAlertLogSheet_()", CODE)
+        self.assertIn("spreadsheet.insertSheet(APP.SHEETS.ALERTS)", CODE)
+        self.assertIn("'歷史事件僅保存已通知項目'", CODE)
+        self.assertIn(".addItem('重建警示紀錄', 'rebuildAlertLog')", CODE)
+        self.assertIn("function rebuildAlertLog()", CODE)
+
+    def test_close_history_uses_one_batch_load_and_retries_sheets_429(self):
+        service = (ROOT / "app" / "service.py").read_text(encoding="utf-8")
+        sheets = (ROOT / "app" / "sheets.py").read_text(encoding="utf-8")
+        self.assertIn("close_existing, previous_closes = self._load_close_history", service)
+        self.assertNotIn("self._load_previous_close(scan.scan_id", service)
+        self.assertIn("def load_close_history(", sheets)
+        self.assertIn("status != 429", sheets)
 
     def test_scan_migration_removes_legacy_validation_before_writing(self):
         migration = re.search(r"function migrateScanSchema070_\(spreadsheet\) \{(.*?)\n\}", CODE, re.S)

@@ -150,6 +150,51 @@ class CloseTrendWriteTests(unittest.TestCase):
 
 
 class CloseAlertStateWriteTests(unittest.TestCase):
+    def test_close_history_is_loaded_once_and_grouped_by_scan(self):
+        existing = [
+            ["2026-08-26|MU", "2026-08-26", "MU", "old", "SUCCESS", '["MU-OLD"]'],
+            ["2026-08-27|MU", "2026-08-27", "MU", "new", "SUCCESS", '["MU-NEW"]'],
+            ["2026-08-25|NVDA", "2026-08-25", "NVDA", "nvda", "SUCCESS", '["NVDA-OLD"]'],
+        ]
+        repository = make_repository(existing)
+        repository._ensure_sheets = lambda *args, **kwargs: None
+        repository._ensure_header = lambda *args, **kwargs: None
+
+        current, previous = repository.load_close_history("2026-08-27")
+
+        self.assertEqual(current["MU"]["第一條件指紋"], "new")
+        self.assertEqual(previous["MU"]["symbols"], ["MU-OLD"])
+        self.assertEqual(previous["NVDA"]["symbols"], ["NVDA-OLD"])
+
+    def test_sheets_429_retries_before_succeeding(self):
+        class Response:
+            status = 429
+
+        class QuotaError(Exception):
+            def __init__(self):
+                self.resp = Response()
+
+        class RetryRequest:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self):
+                self.calls += 1
+                if self.calls < 3:
+                    raise QuotaError()
+                return {"ok": True}
+
+        repository = object.__new__(SheetsRepository)
+        waits = []
+        repository._sleep = waits.append
+        request = RetryRequest()
+
+        result = repository._execute(request)
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(request.calls, 3)
+        self.assertEqual(waits, [5, 10])
+
     def test_attempt_count_starts_at_one_and_increments_on_retry(self):
         existing = [[
             "2026-08-27|MU|2027-01-15", "2026-08-27", "MU|2027-01-15", "fingerprint",

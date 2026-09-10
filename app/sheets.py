@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -82,6 +83,8 @@ class SheetsRepository:
         self.max_monitor_rows = max_monitor_rows
         self.display_timezone = "Asia/Taipei"
         self.service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+        self._verified_headers: set[tuple[str, tuple[str, ...]]] = set()
+        self._sheet_properties_cache: dict[str, dict[str, Any]] | None = None
 
     def load_settings(self) -> dict[str, Any]:
         response = (
@@ -447,50 +450,57 @@ class SheetsRepository:
                 body={"values": updates},
             ).execute()
 
-    def load_close_records(self, market_date: str) -> dict[str, dict[str, Any]]:
+    def load_close_history(
+        self, market_date: str
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+        """Load today's state and the latest prior success for every scan in one read."""
         if not market_date:
-            return {}
+            return {}, {}
         self._ensure_sheets([CLOSE_ALERT_STATE_SHEET], min_columns=len(CLOSE_ALERT_STATE_HEADERS))
         self._ensure_header(CLOSE_ALERT_STATE_SHEET, CLOSE_ALERT_STATE_HEADERS)
-        response = self.service.spreadsheets().values().get(
-            spreadsheetId=self.spreadsheet_id,
-            range=_sheet_range(CLOSE_ALERT_STATE_SHEET, "A2:J"),
-            valueRenderOption="UNFORMATTED_VALUE",
-            dateTimeRenderOption="FORMATTED_STRING",
-        ).execute()
-        result: dict[str, dict[str, Any]] = {}
+        response = self._execute(
+            self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(CLOSE_ALERT_STATE_SHEET, "A2:J"),
+                valueRenderOption="UNFORMATTED_VALUE",
+                dateTimeRenderOption="FORMATTED_STRING",
+            )
+        )
+        current: dict[str, dict[str, Any]] = {}
+        previous: dict[str, dict[str, Any]] = {}
         for row in response.get("values", []):
             padded = row + [""] * (len(CLOSE_ALERT_STATE_HEADERS) - len(row))
             mapped = dict(zip(CLOSE_ALERT_STATE_HEADERS, padded))
-            if str(mapped.get("美東交易日")) == market_date:
-                result[str(mapped.get("掃描ID"))] = mapped
-        return result
+            scan_id = str(mapped.get("掃描ID") or "")
+            record_date = str(mapped.get("美東交易日") or "")
+            if not scan_id or not record_date:
+                continue
+            if record_date == market_date:
+                current[scan_id] = mapped
+                continue
+            if record_date >= market_date or str(mapped.get("狀態")) != "SUCCESS":
+                continue
+            prior = previous.get(scan_id)
+            if prior and str(prior.get("market_date") or "") >= record_date:
+                continue
+            try:
+                symbols = json.loads(str(mapped.get("符合合約JSON") or "[]"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                symbols = []
+            previous[scan_id] = {
+                "market_date": record_date,
+                "fingerprint": mapped.get("第一條件指紋"),
+                "symbols": symbols if isinstance(symbols, list) else [],
+            }
+        return current, previous
+
+    def load_close_records(self, market_date: str) -> dict[str, dict[str, Any]]:
+        current, _ = self.load_close_history(market_date)
+        return current
 
     def load_previous_close_record(self, scan_id: str, market_date: str) -> dict[str, Any] | None:
-        self._ensure_sheets([CLOSE_ALERT_STATE_SHEET], min_columns=len(CLOSE_ALERT_STATE_HEADERS))
-        self._ensure_header(CLOSE_ALERT_STATE_SHEET, CLOSE_ALERT_STATE_HEADERS)
-        response = self.service.spreadsheets().values().get(
-            spreadsheetId=self.spreadsheet_id,
-            range=_sheet_range(CLOSE_ALERT_STATE_SHEET, "A2:J"),
-            valueRenderOption="UNFORMATTED_VALUE",
-            dateTimeRenderOption="FORMATTED_STRING",
-        ).execute()
-        candidates: list[dict[str, Any]] = []
-        for row in response.get("values", []):
-            padded = row + [""] * (len(CLOSE_ALERT_STATE_HEADERS) - len(row))
-            mapped = dict(zip(CLOSE_ALERT_STATE_HEADERS, padded))
-            if (str(mapped.get("掃描ID")) == scan_id and str(mapped.get("狀態")) == "SUCCESS"
-                    and str(mapped.get("美東交易日")) < market_date):
-                candidates.append(mapped)
-        if not candidates:
-            return None
-        latest = max(candidates, key=lambda item: str(item.get("美東交易日")))
-        try:
-            symbols = json.loads(str(latest.get("符合合約JSON") or "[]"))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            symbols = []
-        return {"market_date": latest.get("美東交易日"), "fingerprint": latest.get("第一條件指紋"),
-                "symbols": symbols if isinstance(symbols, list) else []}
+        _, previous = self.load_close_history(market_date)
+        return previous.get(scan_id)
 
     def upsert_close_records(self, records: list[dict[str, Any]]) -> None:
         if not records:
@@ -564,38 +574,51 @@ class SheetsRepository:
         ).execute()
 
     def _ensure_header(self, sheet_name: str, headers: list[str]) -> None:
+        cache_key = (sheet_name, tuple(headers))
+        verified = getattr(self, "_verified_headers", set())
+        if cache_key in verified:
+            return
         end_col = _column_name(len(headers))
-        response = self.service.spreadsheets().values().get(
-            spreadsheetId=self.spreadsheet_id,
-            range=_sheet_range(sheet_name, f"A1:{end_col}1"),
-            valueRenderOption="UNFORMATTED_VALUE",
-        ).execute()
-        values = response.get("values", [])
-        if not values or not any(values[0]):
-            self.service.spreadsheets().values().update(
+        response = self._execute(
+            self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
                 range=_sheet_range(sheet_name, f"A1:{end_col}1"),
-                valueInputOption="RAW",
-                body={"values": [headers]},
-            ).execute()
+                valueRenderOption="UNFORMATTED_VALUE",
+            )
+        )
+        values = response.get("values", [])
+        if not values or not any(values[0]):
+            self._execute(
+                self.service.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=_sheet_range(sheet_name, f"A1:{end_col}1"),
+                    valueInputOption="RAW",
+                    body={"values": [headers]},
+                )
+            )
+            verified.add(cache_key)
+            self._verified_headers = verified
             return
         existing = [str(value) for value in values[0]]
         if existing != headers:
             raise RuntimeError(f"{sheet_name}欄位與目前版本不一致，請先執行初始化／升級系統")
+        verified.add(cache_key)
+        self._verified_headers = verified
 
     def _ensure_sheets(self, titles: list[str], min_columns: int = 26) -> None:
-        metadata = (
-            self.service.spreadsheets()
-            .get(
-                spreadsheetId=self.spreadsheet_id,
-                fields="sheets.properties(sheetId,title,gridProperties(columnCount))",
+        existing = getattr(self, "_sheet_properties_cache", None)
+        if existing is None:
+            metadata = self._execute(
+                self.service.spreadsheets().get(
+                    spreadsheetId=self.spreadsheet_id,
+                    fields="sheets.properties(sheetId,title,gridProperties(columnCount))",
+                )
             )
-            .execute()
-        )
-        existing = {
-            sheet["properties"]["title"]: sheet["properties"]
-            for sheet in metadata.get("sheets", [])
-        }
+            existing = {
+                sheet["properties"]["title"]: sheet["properties"]
+                for sheet in metadata.get("sheets", [])
+            }
+            self._sheet_properties_cache = existing
         requests: list[dict[str, Any]] = []
         for title in dict.fromkeys(titles):
             properties = existing.get(title)
@@ -630,9 +653,25 @@ class SheetsRepository:
                     }
                 )
         if requests:
-            self.service.spreadsheets().batchUpdate(
-                spreadsheetId=self.spreadsheet_id, body={"requests": requests}
-            ).execute()
+            self._execute(
+                self.service.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id, body={"requests": requests}
+                )
+            )
+            self._sheet_properties_cache = None
+
+    def _execute(self, request: Any, max_attempts: int = 5) -> dict[str, Any]:
+        """Execute a Sheets request and retry temporary per-minute quota bursts."""
+        for attempt in range(max_attempts):
+            try:
+                return request.execute()
+            except Exception as exc:
+                status = getattr(getattr(exc, "resp", None), "status", None)
+                if status != 429 or attempt >= max_attempts - 1:
+                    raise
+                sleeper = getattr(self, "_sleep", time.sleep)
+                sleeper(min(5 * (2 ** attempt), 30))
+        return {}
 
     def _serializable(self, value: Any, header: str = "") -> Any:
         if value is None:

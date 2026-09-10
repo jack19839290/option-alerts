@@ -101,7 +101,7 @@ class RefreshService:
             return self._skip("沒有啟用的掃描", now, None)
 
         market_date = close_time.astimezone(ZoneInfo(market_timezone)).date().isoformat() if close_time else ""
-        close_existing = self._load_close_records(market_date) if capture_close else {}
+        close_existing, previous_closes = self._load_close_history(market_date) if capture_close else ({}, {})
         if capture_close and all(close_existing.get(scan.scan_id, {}).get("狀態") == "SUCCESS" for scan in active):
             return self._skip("本交易日收盤更新已完整完成", now, None)
         first_close_attempt = capture_close and not close_existing
@@ -176,6 +176,7 @@ class RefreshService:
                 scan_states = previous_states.get(scan.scan_id, {}) if state_matches else {}
                 rows: list[dict[str, Any]] = []
                 new_realtime: list[dict[str, Any]] = []
+                all_realtime_matches: list[dict[str, Any]] = []
                 first_count = second_count = 0
                 quotes = [q for q in snapshot.quotes if scan.display_type == "ALL" or q.option_type == scan.display_type]
                 for quote in quotes:
@@ -252,10 +253,13 @@ class RefreshService:
                         "資料狀態": "；".join(issues) if issues else "正常", "_priority": priority,
                     }
                     rows.append(row)
-                    if alert.pending_email:
+                    if second.matched is True:
                         item = _email_item(row)
                         item["sequence"] = alert.sequence
-                        new_realtime.append(item)
+                        item["triggered_now"] = bool(alert.pending_email)
+                        all_realtime_matches.append(item)
+                        if alert.pending_email:
+                            new_realtime.append(dict(item))
 
                 rows.sort(key=lambda row: (row["_priority"], row["類型"], row["履約價"]))
                 for row in rows:
@@ -267,8 +271,10 @@ class RefreshService:
                         "事件ID": _event_id("RT", scan.scan_id, scan.second_condition_fingerprint, signature),
                         "事件類型": "SECOND_REALTIME", "狀態": "PENDING", "建立時間(UTC)": now,
                         "掃描ID": scan.scan_id, "股票代號": scan.ticker, "到期日": scan.expiry,
-                        "是否完整": True, "內容JSON": {"groups": [{"scan_id": scan.scan_id,
-                            "ticker": scan.ticker, "expiry": scan.expiry.isoformat(), "items": new_realtime}]},
+                        "是否完整": True, "內容JSON": {"complete": True, "snapshot_version": 2,
+                            "groups": [{"scan_id": scan.scan_id, "ticker": scan.ticker,
+                            "expiry": scan.expiry.isoformat(), "items": new_realtime,
+                            "all_matching_items": all_realtime_matches}]},
                     })
                 scan_status = "正常" if rows and all(r["資料狀態"] == "正常" for r in rows) else "部分資料不足" if rows else "期權鍊無資料"
                 updates[scan.scan_id] = {
@@ -286,7 +292,7 @@ class RefreshService:
 
                 if capture_close:
                     if close_existing.get(scan.scan_id, {}).get("狀態") != "SUCCESS":
-                        previous_close = self._load_previous_close(scan.scan_id, market_date)
+                        previous_close = previous_closes.get(scan.scan_id)
                         previous_symbols = set(previous_close.get("symbols", [])) if previous_close else set()
                         same_fingerprint = bool(previous_close and previous_close.get("fingerprint") == scan.first_condition_fingerprint)
                         matches = [row for row in rows if row["第一門檻結果"] == "符合"]
@@ -299,6 +305,7 @@ class RefreshService:
                         if scan.first_threshold.enabled and scan.email_enabled:
                             close_groups.append({"scan_id": scan.scan_id, "ticker": scan.ticker,
                                                  "expiry": scan.expiry.isoformat(), "items": items,
+                                                 "all_matching_items": items,
                                                  "baseline_changed": baseline_changed})
 
         if rate_limit_error:
@@ -332,7 +339,8 @@ class RefreshService:
                     "事件ID": _event_id("CLOSE", market_date, suffix), "事件類型": event_type,
                     "狀態": "PENDING", "建立時間(UTC)": now, "美東交易日": market_date,
                     "是否完整": not close_failures, "失敗掃描": [scan.scan_id for scan in close_failures],
-                    "內容JSON": {"market_date": market_date, "groups": selected_groups,
+                    "內容JSON": {"market_date": market_date, "snapshot_version": 2,
+                                   "groups": selected_groups,
                                    "failed_scans": [scan.scan_id for scan in close_failures],
                                    "complete": not close_failures},
                 })
@@ -374,11 +382,11 @@ class RefreshService:
         self.repository.append_system_log("INFO" if complete else "WARN", status, json.dumps(details, ensure_ascii=False))
         return {"status": status, **details}
 
-    def _load_close_records(self, market_date: str) -> dict[str, dict[str, Any]]:
-        return self.repository.load_close_records(market_date) if hasattr(self.repository, "load_close_records") else {}
-
-    def _load_previous_close(self, scan_id: str, market_date: str) -> dict[str, Any] | None:
-        return self.repository.load_previous_close_record(scan_id, market_date) if hasattr(self.repository, "load_previous_close_record") else None
+    def _load_close_history(self, market_date: str) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+        if hasattr(self.repository, "load_close_history"):
+            return self.repository.load_close_history(market_date)
+        current = self.repository.load_close_records(market_date) if hasattr(self.repository, "load_close_records") else {}
+        return current, {}
 
     def _upsert_close_records(self, records: list[dict[str, Any]]) -> None:
         if hasattr(self.repository, "upsert_close_records"):

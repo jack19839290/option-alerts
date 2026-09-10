@@ -20,6 +20,7 @@ class FakeRepository:
         self.notification_events = []
         self.close_records = {}
         self.previous_close = {}
+        self.close_history_loads = 0
         self.logs = []
 
     def load_settings(self):
@@ -45,6 +46,10 @@ class FakeRepository:
 
     def load_close_records(self, market_date):
         return dict(self.close_records.get(market_date, {}))
+
+    def load_close_history(self, market_date):
+        self.close_history_loads += 1
+        return dict(self.close_records.get(market_date, {})), dict(self.previous_close)
 
     def load_previous_close_record(self, scan_id, market_date):
         return self.previous_close.get(scan_id)
@@ -271,6 +276,13 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(repository.notification_events), 1)
         payload = repository.notification_events[0]["內容JSON"]
         self.assertEqual(payload["groups"][0]["items"][0]["contract_symbol"], "MU270115P00055000")
+        snapshot = payload["groups"][0]["all_matching_items"]
+        self.assertEqual({item["contract_symbol"] for item in snapshot}, {
+            "MU270115P00055000", "MU270115C00055000"
+        })
+        triggered = {item["contract_symbol"]: item["triggered_now"] for item in snapshot}
+        self.assertTrue(triggered["MU270115P00055000"])
+        self.assertFalse(triggered["MU270115C00055000"])
 
     def test_second_condition_change_notifies_current_matches(self):
         scan = make_scan(second=True, second_fingerprint="old-conditions")
@@ -318,6 +330,16 @@ class ServiceTests(unittest.TestCase):
         flags = {item["contract_symbol"]: item["is_new"] for item in items}
         self.assertTrue(flags["MU270115P00055000"])
         self.assertFalse(flags["MU270115C00055000"])
+        self.assertEqual(repository.close_history_loads, 1)
+
+    def test_many_close_scans_load_close_history_only_once(self):
+        scans = [make_scan(ticker=f"T{i}") for i in range(25)]
+        repository = FakeRepository(scans)
+        now = datetime(2026, 8, 27, 20, 45, tzinfo=timezone.utc)
+
+        RefreshService(repository, FakeProvider()).refresh(now=now)
+
+        self.assertEqual(repository.close_history_loads, 1)
 
     def test_partial_success_does_not_advance_last_complete_success(self):
         good, bad = make_scan(), make_scan(ticker="BAD")
