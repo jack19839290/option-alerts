@@ -8,6 +8,24 @@ on:
         required: false
         default: false
         type: boolean
+      operation:
+        description: Job to run
+        required: false
+        default: refresh
+        type: choice
+        options:
+          - refresh
+          - expiration_lookup
+      ticker:
+        description: Ticker used by expiration_lookup
+        required: false
+        default: ''
+        type: string
+      request_id:
+        description: Request id used by expiration_lookup
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -24,6 +42,8 @@ jobs:
       SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       MAX_MONITOR_ROWS: '1000'
       FORCE_REFRESH: ${{ github.event.inputs.force || 'false' }}
+      EXPIRATION_TICKER: ${{ github.event.inputs.ticker || '' }}
+      EXPIRATION_REQUEST_ID: ${{ github.event.inputs.request_id || '' }}
 
     steps:
       - name: Checkout source
@@ -44,4 +64,9 @@ jobs:
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Refresh option alerts
+        if: ${{ github.event.inputs.operation != 'expiration_lookup' }}
         run: python -m app.run_once
+
+      - name: Lookup option expirations
+        if: ${{ github.event.inputs.operation == 'expiration_lookup' }}
+        run: python -m app.lookup_expirations

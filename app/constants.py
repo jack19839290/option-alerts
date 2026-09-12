@@ -5,6 +5,7 @@ SYSTEM_LOG_SHEET = "系統紀錄"
 CLOSE_TREND_SHEET = "收盤Delta趨勢"
 NOTIFICATION_QUEUE_SHEET = "通知佇列"
 CLOSE_ALERT_STATE_SHEET = "收盤門檻紀錄"
+EXPIRATION_CACHE_SHEET = "到期日快取"
 
 SCAN_HEADERS = [
     "啟用", "掃描ID", "股票代號", "到期日", "顯示類型",
@@ -51,6 +52,9 @@ CLOSE_ALERT_STATE_HEADERS = [
     "記錄ID", "美東交易日", "掃描ID", "第一條件指紋", "狀態", "符合合約JSON",
     "最後嘗試時間(UTC)", "成功時間(UTC)", "錯誤訊息", "嘗試次數",
 ]
+EXPIRATION_CACHE_HEADERS = [
+    "股票代號", "狀態", "查詢ID", "查詢時間(UTC)", "到期日JSON", "到期日數量", "錯誤訊息",
+]
 
 CLOSE_TREND_TARGETS = (0.10, 0.15, 0.20)
 CLOSE_TREND_HEADERS = [
@@ -68,7 +72,7 @@ SETTINGS_DEFAULTS = {
     "通知信箱": "", "自動更新規則": "開盤、盤中整點、收盤", "盤外自動更新": "停用",
     "資料過期門檻(分鐘)": 10, "無風險利率代號": "^IRX", "備援無風險利率": 0.05,
     "預設股息殖利率": 0, "顯示時區": "Asia/Taipei", "市場時區": "America/New_York",
-    "Cloud Run URL": "", "Web App URL": "", "系統版本": "0.7.3",
+    "Cloud Run URL": "", "Web App URL": "", "系統版本": "0.8.0",
     "下次允許抓取(UTC)": "", "連續失敗次數": 0, "最後成功抓取(UTC)": "",
     "最後執行(UTC)": "", "最後狀態": "尚未執行", "GitHub 自動更新": "尚未設定",
     "GitHub 金鑰到期日": "", "GitHub 最後要求(UTC)": "", "GitHub 最後要求狀態": "尚未執行",

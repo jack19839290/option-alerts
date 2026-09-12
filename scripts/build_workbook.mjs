@@ -18,6 +18,7 @@ const systemLog = workbook.worksheets.add("系統紀錄");
 const closeTrend = workbook.worksheets.add("收盤Delta趨勢");
 const queue = workbook.worksheets.add("通知佇列");
 const closeState = workbook.worksheets.add("收盤門檻紀錄");
+const expirationCache = workbook.worksheets.add("到期日快取");
 const sampleChain = workbook.worksheets.add("MU_2027-01-15");
 
 const scanHeaders = [
@@ -46,6 +47,10 @@ const closeTrendHeaders = [
   "Theta估算(每日)", "Vega估算(每1%)", "成交量", "未平倉", "最後成交時間", "無風險利率",
   "無風險利率來源", "股息殖利率", "Greeks模型", "資料狀態", "備註／未選取原因",
   "標的－履約價差", "標的－履約價差率",
+];
+
+const expirationCacheHeaders = [
+  "股票代號", "狀態", "查詢ID", "查詢時間(UTC)", "到期日JSON", "到期日數量", "錯誤訊息",
 ];
 
 const chainHeaders = [
@@ -129,7 +134,7 @@ dashboard.getRange("A13:H18").merge(true);
 dashboard.getRange("A13:A18").values = [
   ["1. 在 Google Sheets 選單「選擇權警示」執行「初始化／升級系統」。"],
   ["2. 在「設定」填入固定通知信箱，再從選單設定 90 天 GitHub 金鑰。"],
-  ["3. 透過表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。"],
+  ["3. 表單輸入股票後可勾選未來一年內多個到期日，並套用同一組掃描條件。"],
   ["4. 開盤、盤中整點與收盤自動更新；正式收盤會保存 Delta 0.10／0.15／0.20 趨勢。"],
   ["5. 第一門檻每天收盤彙總全部符合項目；第二門檻首次符合時即時通知。"],
   ["6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。"],
@@ -297,7 +302,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.7.3", "目前規格版本"],
+  ["系統版本", "0.8.0", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
@@ -348,6 +353,9 @@ alertLog.freezePanes.freezeColumns(4);
 
 systemLog.getRange("A1:D1").values = [["時間(UTC)", "等級", "訊息", "詳細資料"]];
 systemLog.getRange("A1:D1").format = { fill: "#E5E7EB", font: { bold: true } };
+expirationCache.getRange("A1:G1").values = [expirationCacheHeaders];
+expirationCache.getRange("A1:G1").format = { fill: "#E5E7EB", font: { bold: true } };
+expirationCache.freezePanes.freezeRows(1);
 systemLog.getRange("A:A").format.columnWidthPx = 190;
 systemLog.getRange("B:B").format.columnWidthPx = 80;
 systemLog.getRange("C:C").format.columnWidthPx = 180;

@@ -6,23 +6,42 @@
     :root{font-family:Arial,"Noto Sans TC",sans-serif;color:#111827}body{margin:0;background:#f8fafc}
     main{max-width:820px;margin:auto;padding:20px}h1{margin:0 0 6px;font-size:24px}.sub{color:#64748b;line-height:1.55}
     form{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;background:#fff;padding:20px;border:1px solid #e5e7eb;border-radius:12px}
-    label{display:grid;gap:6px;font-size:13px;font-weight:600}.full,fieldset,button,#status,.notice{grid-column:1/-1}
+    label{display:grid;gap:6px;font-size:13px;font-weight:600}.full,fieldset,button,#status,.notice,.expiry-panel{grid-column:1/-1}
     fieldset{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;border:1px solid #cbd5e1;border-radius:10px;padding:16px}
     legend{padding:0 8px;font-weight:700;color:#1e40af}.condition{display:grid;grid-template-columns:.9fr 1.1fr;gap:8px}
     input,select,textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:7px;font:inherit;background:#fff}
     input:focus,select:focus,textarea:focus{outline:2px solid #93c5fd;border-color:#2563eb}.check{display:flex;align-items:center;gap:8px}.check input{width:auto}
     .hint{font-size:12px;font-weight:400;color:#64748b;line-height:1.35}.notice{padding:11px;border-radius:8px;background:#eff6ff;color:#1e40af;font-size:12px;line-height:1.5}
-    textarea{min-height:64px;resize:vertical}button{border:0;border-radius:8px;padding:12px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}button:disabled{background:#94a3b8}
-    #status{display:none;padding:9px;border-radius:7px}#status.ok{display:block;background:#dcfce7;color:#166534}#status.error{display:block;background:#fee2e2;color:#991b1b}
-    @media(max-width:600px){form,fieldset{grid-template-columns:1fr}.full,fieldset,button,#status,.notice{grid-column:1}}
+    textarea{min-height:64px;resize:vertical}button{border:0;border-radius:8px;padding:12px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}button:disabled{background:#94a3b8;cursor:not-allowed}
+    #status{display:none;padding:9px;border-radius:7px;white-space:pre-line}#status.ok{display:block;background:#dcfce7;color:#166534}#status.error{display:block;background:#fee2e2;color:#991b1b}
+    .expiry-panel{border:1px solid #cbd5e1;border-radius:10px;padding:14px;background:#f8fafc}.expiry-head{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .expiry-title{font-size:14px;font-weight:700}.expiry-actions{display:flex;gap:8px}.secondary{width:auto;padding:7px 10px;background:#e2e8f0;color:#1e293b;font-size:12px}.secondary:disabled{background:#e5e7eb;color:#94a3b8}
+    #expiryMessage{font-size:12px;color:#64748b;margin:8px 0}.expiry-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:260px;overflow:auto}
+    .expiry-option{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #e2e8f0;border-radius:7px;background:#fff;font-size:13px}.expiry-option input{width:auto}.expiry-option.existing{background:#f1f5f9;color:#64748b}
+    .badge{margin-left:auto;padding:2px 6px;border-radius:999px;background:#dbeafe;color:#1e40af;font-size:11px}.hidden{display:none}
+    @media(max-width:600px){form,fieldset{grid-template-columns:1fr}.full,fieldset,button,#status,.notice,.expiry-panel{grid-column:1}.expiry-list{grid-template-columns:1fr}}
   </style>
 </head>
 <body><main>
   <h1>期權鍊掃描設定</h1>
-  <p class="sub">第一門檻用於每日收盤完整彙總；第二門檻用於盤中首次符合的即時通知。每組只會判斷已填寫的條件。</p>
+  <p class="sub">輸入股票代號後，系統會列出 Yahoo 目前提供、未來一年內的到期日。可一次選擇多個日期並套用相同條件。</p>
   <form id="scanForm">
-    <label>股票代號<input name="ticker" required maxlength="15" placeholder="MU" autocomplete="off"></label>
-    <label>到期日<input name="expiry" type="date" required></label>
+    <label class="full">股票代號<input id="tickerInput" name="ticker" required maxlength="15" placeholder="MU" autocomplete="off"><span class="hint">停止輸入後會自動查詢；首次查詢通常需要等待 GitHub Actions 啟動。</span></label>
+
+    <section class="expiry-panel">
+      <div class="expiry-head">
+        <span class="expiry-title">到期日</span>
+        <div class="expiry-actions">
+          <button id="selectAllButton" class="secondary" type="button" disabled>選取一年內全部</button>
+          <button id="clearButton" class="secondary" type="button" disabled>清除選取</button>
+          <button id="refreshButton" class="secondary" type="button" disabled>重新查詢</button>
+        </div>
+      </div>
+      <div id="expiryMessage">請先輸入股票代號。</div>
+      <div id="expiryList" class="expiry-list"></div>
+      <label id="updateExistingLabel" class="check hidden" style="margin-top:10px"><input id="updateExisting" name="updateExisting" type="checkbox">將相同條件套用至已存在的掃描（預設略過）</label>
+    </section>
+
     <label class="full">顯示類型<select name="displayType"><option value="ALL">全部 CALL＋PUT</option><option value="CALL">只顯示 CALL</option><option value="PUT">只顯示 PUT</option></select></label>
 
     <fieldset><legend>第一門檻：每日收盤通知</legend>
@@ -44,10 +63,46 @@
     <label>CALL 持股成本<input name="callCostBasis" type="number" min="0.0001" step="0.0001" placeholder="例如 60"><span class="hint">只有 CALL 年化報酬率使用；未填時 CALL 年化留白。</span></label>
     <label class="check"><input name="emailEnabled" type="checkbox" checked>啟用 Email 通知</label>
     <label class="full">備註<textarea name="note" maxlength="500" placeholder="選填"></textarea></label>
-    <div class="notice">第一門檻每天正式收盤都寄出全部符合項目，並標示相較前一個有效收盤的「今日新增」；即使 0 筆也會通知。第二門檻首次符合會寄信，持續符合不重複，連續兩次有效不符合後才重新待命。</div>
-    <button id="submitButton" type="submit">儲存期權鍊掃描</button><div id="status"></div>
+    <div class="notice">第一門檻每天正式收盤都寄出全部符合項目，並標示相較前一個有效收盤的「今日新增」。收盤 Email 會依股票代號與到期日排列，0 筆項目不列出。第二門檻首次符合會寄信，持續符合不重複，連續兩次有效不符合後才重新待命。</div>
+    <button id="submitButton" type="submit" disabled>儲存所選期權鍊掃描</button><div id="status"></div>
   </form>
 </main><script>
-const form=document.getElementById('scanForm'),button=document.getElementById('submitButton'),statusBox=document.getElementById('status');
-form.addEventListener('submit',event=>{event.preventDefault();button.disabled=true;statusBox.className='';statusBox.style.display='none';const data=Object.fromEntries(new FormData(form).entries());['firstEnabled','secondEnabled','emailEnabled'].forEach(name=>data[name]=form.elements[name].checked);google.script.run.withSuccessHandler(result=>{button.disabled=false;statusBox.textContent=`${result.message}：${result.scanId}，工作表 ${result.sheetName}`;statusBox.className='ok'}).withFailureHandler(error=>{button.disabled=false;statusBox.textContent=error&&error.message?error.message:String(error);statusBox.className='error'}).submitScan(data)});
+const form=document.getElementById('scanForm'),tickerInput=document.getElementById('tickerInput');
+const button=document.getElementById('submitButton'),statusBox=document.getElementById('status');
+const expiryMessage=document.getElementById('expiryMessage'),expiryList=document.getElementById('expiryList');
+const selectAllButton=document.getElementById('selectAllButton'),clearButton=document.getElementById('clearButton'),refreshButton=document.getElementById('refreshButton');
+const updateExisting=document.getElementById('updateExisting'),updateExistingLabel=document.getElementById('updateExistingLabel');
+let debounceTimer=null,pollTimer=null,activeTicker='',activeRequestId='',lookupGeneration=0;
+function normalizedTicker(){return tickerInput.value.trim().toUpperCase()}
+function validTicker(value){return /^[A-Z0-9.^-]{1,15}$/.test(value)}
+function setStatus(message,type){statusBox.textContent=message;statusBox.className=type||'';statusBox.style.display=message?'block':'none'}
+function selectedExpiries(){return [...expiryList.querySelectorAll('input[type="checkbox"]:checked')].map(input=>input.value)}
+function syncSubmit(){button.disabled=!validTicker(normalizedTicker())||selectedExpiries().length===0}
+function setLookupControls(enabled){selectAllButton.disabled=!enabled;clearButton.disabled=!enabled;refreshButton.disabled=!validTicker(normalizedTicker())}
+function clearExpiryResults(message){if(pollTimer)clearTimeout(pollTimer);pollTimer=null;activeRequestId='';expiryList.innerHTML='';expiryMessage.textContent=message||'請先輸入股票代號。';updateExistingLabel.classList.add('hidden');setLookupControls(false);syncSubmit()}
+function renderExpirations(result){
+  const dates=Array.isArray(result.expirations)?result.expirations:[];expiryList.innerHTML='';
+  dates.forEach(item=>{const label=document.createElement('label');label.className=`expiry-option${item.existing?' existing':''}`;const input=document.createElement('input');input.type='checkbox';input.name='expiryChoice';input.value=item.date;input.dataset.existing=item.existing?'true':'false';input.checked=!item.existing;input.disabled=item.existing&&!updateExisting.checked;input.addEventListener('change',syncSubmit);label.appendChild(input);label.appendChild(document.createTextNode(`${item.date}（DTE：${item.dte}）`));if(item.existing){const badge=document.createElement('span');badge.className='badge';badge.textContent='已建立';label.appendChild(badge)}expiryList.appendChild(label)});
+  const existingCount=dates.filter(item=>item.existing).length;expiryMessage.textContent=dates.length?`未來一年內共 ${dates.length} 個到期日${existingCount?`，其中 ${existingCount} 個已建立`:''}。已自動選取可新增日期。`:'Yahoo 目前沒有回傳未來一年內的到期日。';updateExistingLabel.classList.toggle('hidden',existingCount===0);setLookupControls(dates.length>0);syncSubmit();
+}
+function handleLookupResult(result,generation){
+  if(generation!==lookupGeneration||normalizedTicker()!==activeTicker)return;activeRequestId=result&&result.requestId?result.requestId:activeRequestId;
+  if(result&&result.status==='SUCCESS'){renderExpirations(result);refreshButton.disabled=false;return}
+  if(result&&result.status==='FAILED'){clearExpiryResults(result.error||'到期日查詢失敗，請重新查詢。');refreshButton.disabled=false;setStatus(result.error||'到期日查詢失敗','error');return}
+  expiryMessage.textContent='正在由 GitHub Actions 查詢 Yahoo 到期日，通常需要約 30–90 秒…';refreshButton.disabled=true;pollTimer=setTimeout(()=>pollLookup(generation),3000);
+}
+function pollLookup(generation){google.script.run.withSuccessHandler(result=>handleLookupResult(result,generation)).withFailureHandler(error=>{if(generation===lookupGeneration){clearExpiryResults(error&&error.message?error.message:String(error));setStatus(expiryMessage.textContent,'error')}}).getExpirationQueryStatus(activeTicker,activeRequestId)}
+function lookupExpirations(force){
+  const ticker=normalizedTicker();tickerInput.value=ticker;lookupGeneration+=1;const generation=lookupGeneration;
+  if(!validTicker(ticker)){activeTicker='';clearExpiryResults(ticker?'股票代號格式不正確。':'請先輸入股票代號。');return}
+  activeTicker=ticker;clearExpiryResults('正在送出到期日查詢…');refreshButton.disabled=true;setStatus('','');
+  const runner=google.script.run.withSuccessHandler(result=>handleLookupResult(result,generation)).withFailureHandler(error=>{if(generation===lookupGeneration){clearExpiryResults(error&&error.message?error.message:String(error));refreshButton.disabled=false;setStatus(expiryMessage.textContent,'error')}});if(force)runner.refreshExpirationDates(ticker);else runner.requestExpirationDates(ticker);
+}
+tickerInput.addEventListener('input',()=>{tickerInput.value=tickerInput.value.toUpperCase();activeTicker='';clearTimeout(debounceTimer);clearExpiryResults('等待股票代號輸入完成…');debounceTimer=setTimeout(()=>lookupExpirations(false),800)});
+tickerInput.addEventListener('blur',()=>{clearTimeout(debounceTimer);if(normalizedTicker()&&(!activeTicker||!expiryList.children.length))lookupExpirations(false)});
+refreshButton.addEventListener('click',()=>lookupExpirations(true));
+selectAllButton.addEventListener('click',()=>{expiryList.querySelectorAll('input[type="checkbox"]').forEach(input=>{if(!input.disabled)input.checked=true});syncSubmit()});
+clearButton.addEventListener('click',()=>{expiryList.querySelectorAll('input[type="checkbox"]').forEach(input=>input.checked=false);syncSubmit()});
+updateExisting.addEventListener('change',()=>{expiryList.querySelectorAll('input[data-existing="true"]').forEach(input=>{input.disabled=!updateExisting.checked;if(!updateExisting.checked)input.checked=false});syncSubmit()});
+form.addEventListener('submit',event=>{event.preventDefault();const expiries=selectedExpiries();if(!expiries.length){setStatus('請至少選擇一個到期日','error');return}button.disabled=true;button.textContent='正在儲存…';setStatus('','');const data=Object.fromEntries(new FormData(form).entries());['firstEnabled','secondEnabled','emailEnabled','updateExisting'].forEach(name=>data[name]=form.elements[name].checked);data.expiries=expiries;google.script.run.withSuccessHandler(result=>{button.textContent='儲存所選期權鍊掃描';lookupExpirations(false);setStatus(result.message,'ok')}).withFailureHandler(error=>{button.textContent='儲存所選期權鍊掃描';syncSubmit();setStatus(error&&error.message?error.message:String(error),'error')}).submitScans(data)});
 </script></body></html>

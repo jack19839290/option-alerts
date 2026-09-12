@@ -147,6 +147,26 @@ class YahooFinanceProvider:
                 raise RateLimitError(str(exc)) from exc
             raise MarketDataError(f"{ticker_symbol} {expiry}: {exc}") from exc
 
+    def fetch_expirations(self, ticker_symbol: str) -> list[date]:
+        """Return the option expiration dates currently advertised by Yahoo."""
+        try:
+            ticker = self._yf().Ticker(ticker_symbol)
+            raw_dates = ticker.options
+            expirations = sorted(
+                {
+                    date.fromisoformat(str(value).strip())
+                    for value in raw_dates
+                    if str(value).strip()
+                }
+            )
+        except Exception as exc:
+            if self._is_rate_limit(exc):
+                raise RateLimitError(str(exc)) from exc
+            raise MarketDataError(f"{ticker_symbol}: 無法取得到期日清單：{exc}") from exc
+        if not expirations:
+            raise MarketDataError(f"{ticker_symbol}: Yahoo 沒有回傳可用的期權到期日")
+        return expirations
+
     def _underlying_price(self, ticker: Any, underlying: dict[str, Any]) -> float | None:
         for key in ("regularMarketPrice", "postMarketPrice", "preMarketPrice"):
             value = _safe_float(underlying.get(key))

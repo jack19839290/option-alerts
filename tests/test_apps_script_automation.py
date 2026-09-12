@@ -9,13 +9,13 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_7_3_everywhere(self):
-        self.assertIn("VERSION: '0.7.3'", CODE)
-        self.assertIn('version = "0.7.3"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.7.3"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
-        self.assertIn('["系統版本", "0.7.3", "目前規格版本"]',
+    def test_version_is_0_8_0_everywhere(self):
+        self.assertIn("VERSION: '0.8.0'", CODE)
+        self.assertIn('version = "0.8.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.8.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+        self.assertIn('["系統版本", "0.8.0", "目前規格版本"]',
                       (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8"))
-        self.assertIn('目前版本：`0.7.3`', (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('目前版本：`0.8.0`', (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
         self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)
@@ -90,9 +90,33 @@ class AppsScriptAutomationTests(unittest.TestCase):
     def test_dispatch_accepts_github_success_codes(self):
         self.assertIn("code !== 200 && code !== 204", CODE)
         self.assertIn("/dispatches", CODE)
-        self.assertIn("inputs: {force: mode === 'manual' ? 'true' : 'false'}", CODE)
+        self.assertIn("operation,", CODE)
+        self.assertIn("request_id: job.requestId || ''", CODE)
         workflow = (ROOT / ".github" / "workflows" / "option-alerts.yml").read_text(encoding="utf-8")
         self.assertIn("FORCE_REFRESH:", workflow)
+
+    def test_expiration_lookup_and_batch_scan_ui_are_wired(self):
+        form = (ROOT / "apps-script" / "Index.html").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github" / "workflows" / "option-alerts.yml").read_text(encoding="utf-8")
+        self.assertIn("function requestExpirationDates(tickerValue)", CODE)
+        self.assertIn("function getExpirationQueryStatus(tickerValue, requestIdValue)", CODE)
+        self.assertIn("function submitScans(payload)", CODE)
+        self.assertIn("MAX_DTE: 365", CODE)
+        self.assertIn("到期日查詢等待超過 10 分鐘", CODE)
+        self.assertIn("已存在的掃描（預設略過）", form)
+        self.assertIn("DTE：${item.dte}", form)
+        self.assertIn(".submitScans(data)", form)
+        self.assertIn("expiration_lookup", workflow)
+        self.assertIn("python -m app.lookup_expirations", workflow)
+
+    def test_close_email_sorts_groups_and_omits_zero_match_sections(self):
+        builder = re.search(r"function buildQueueEmail_\(.*?\n\}", CODE, re.S)
+        self.assertIsNotNone(builder)
+        block = builder.group(0)
+        self.assertIn("sourceGroups.filter(group => (group.items || []).length > 0)", block)
+        self.assertIn("left.ticker", block)
+        self.assertIn("left.expiry", block)
+        self.assertIn("本日收盤無符合第一門檻的合約", block)
 
     def test_spread_replaces_vega_filter_but_vega_stays_in_chain(self):
         form = (ROOT / "apps-script" / "Index.html").read_text(encoding="utf-8")

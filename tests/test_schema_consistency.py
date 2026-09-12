@@ -2,7 +2,7 @@ import re
 import unittest
 from pathlib import Path
 
-from app.constants import ALERT_LOG_HEADERS, CHAIN_HEADERS, CLOSE_ALERT_STATE_HEADERS, CLOSE_TREND_HEADERS, SCAN_HEADERS
+from app.constants import ALERT_LOG_HEADERS, CHAIN_HEADERS, CLOSE_ALERT_STATE_HEADERS, CLOSE_TREND_HEADERS, EXPIRATION_CACHE_HEADERS, SCAN_HEADERS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,8 +69,18 @@ class SchemaConsistencyTests(unittest.TestCase):
         code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
         self.assertNotIn(".insertCheckboxes()", code)
-        self.assertIn("firstAvailableRow", code)
+        self.assertIn("availableRows", code)
         self.assertIn("clearPlaceholderCheckboxValues_", code)
+
+    def test_expiration_cache_headers_match_python_apps_script_and_template(self):
+        code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8")
+        apps_block = re.search(r"EXPIRATION_CACHE_HEADERS:\s*\[(.*?)\]\s*,", code, re.S)
+        builder_block = re.search(r"const expirationCacheHeaders = \[(.*?)\];", builder, re.S)
+        self.assertIsNotNone(apps_block)
+        self.assertIsNotNone(builder_block)
+        self.assertEqual(quoted_values(apps_block.group(1)), EXPIRATION_CACHE_HEADERS)
+        self.assertEqual(quoted_values(builder_block.group(1)), EXPIRATION_CACHE_HEADERS)
 
 
 if __name__ == "__main__":

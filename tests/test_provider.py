@@ -31,9 +31,10 @@ class FakeClose:
 
 
 class FakeTicker:
-    def __init__(self, fast_info=None, closes=None):
+    def __init__(self, fast_info=None, closes=None, options=None):
         self.fast_info = fast_info or {}
         self.closes = closes or []
+        self.options = options or []
         self.history_calls = 0
 
     def history(self, **kwargs):
@@ -134,6 +135,18 @@ class RiskFreeRateTests(unittest.TestCase):
 
     def test_irx_is_always_percentage_points_even_below_one(self):
         self.assertAlmostEqual(_normalize_yahoo_rate(0.5, "^IRX"), 0.005)
+
+
+class ExpirationLookupTests(unittest.TestCase):
+    def test_expirations_are_parsed_deduplicated_and_sorted(self):
+        ticker = FakeTicker(options=["2027-03-19", "2026-12-18", "2027-03-19"])
+        provider = YahooFinanceProvider()
+        provider._yf = lambda: FakeYFinance(ticker)
+
+        self.assertEqual(
+            provider.fetch_expirations("MU"),
+            [date(2026, 12, 18), date(2027, 3, 19)],
+        )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.7.3',
+  VERSION: '0.8.0',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -9,6 +9,7 @@ const APP = Object.freeze({
     CLOSE_TRENDS: '收盤Delta趨勢',
     QUEUE: '通知佇列',
     CLOSE_STATE: '收盤門檻紀錄',
+    EXPIRATION_CACHE: '到期日快取',
   },
   GITHUB: {
     OWNER: 'jack19839290',
@@ -30,6 +31,11 @@ const APP = Object.freeze({
     LAST_EXPIRY_NOTICE_DATE: 'GITHUB_LAST_EXPIRY_NOTICE_DATE',
     CURRENT_MATCH_TOKEN: 'ALERT_LOG_CURRENT_MATCH_TOKEN',
     CURRENT_MATCH_COUNT: 'ALERT_LOG_CURRENT_MATCH_COUNT',
+  },
+  EXPIRATION_LOOKUP: {
+    CACHE_TTL_MS: 24 * 60 * 60 * 1000,
+    PENDING_TTL_MS: 10 * 60 * 1000,
+    MAX_DTE: 365,
   },
   SCAN_HEADERS: [
     '啟用', '掃描ID', '股票代號', '到期日', '顯示類型',
@@ -71,6 +77,8 @@ const APP = Object.freeze({
     '內容JSON', '最後錯誤'],
   CLOSE_STATE_HEADERS: ['記錄ID', '美東交易日', '掃描ID', '第一條件指紋', '狀態', '符合合約JSON',
     '最後嘗試時間(UTC)', '成功時間(UTC)', '錯誤訊息', '嘗試次數'],
+  EXPIRATION_CACHE_HEADERS: ['股票代號', '狀態', '查詢ID', '查詢時間(UTC)', '到期日JSON',
+    '到期日數量', '錯誤訊息'],
 });
 
 function onOpen() {
@@ -110,66 +118,188 @@ function getFormDefaults() {
   };
 }
 
+function requestExpirationDates(tickerValue) {
+  ensureSystemSheets_();
+  const ticker = validateTicker_(tickerValue);
+  const cached = readExpirationCacheRecord_(ticker);
+  const age = cached ? Date.now() - parseExpirationCacheTime_(cached.checkedAt) : Infinity;
+  if (cached && cached.status === 'SUCCESS' && age <= APP.EXPIRATION_LOOKUP.CACHE_TTL_MS) {
+    return buildExpirationLookupResult_(cached);
+  }
+  if (cached && cached.status === 'PENDING' && age <= APP.EXPIRATION_LOOKUP.PENDING_TTL_MS) {
+    return buildExpirationLookupResult_(cached);
+  }
+
+  const requestId = Utilities.getUuid();
+  upsertExpirationCacheRecord_({
+    ticker,
+    status: 'PENDING',
+    requestId,
+    checkedAt: new Date().toISOString(),
+    expirations: [],
+    error: '',
+  });
+  try {
+    dispatchGitHubWorkflow_('expiration_lookup', {ticker, requestId});
+  } catch (error) {
+    upsertExpirationCacheRecord_({
+      ticker,
+      status: 'FAILED',
+      requestId,
+      checkedAt: new Date().toISOString(),
+      expirations: [],
+      error: error.message || String(error),
+    });
+    throw error;
+  }
+  return buildExpirationLookupResult_(readExpirationCacheRecord_(ticker));
+}
+
+function getExpirationQueryStatus(tickerValue, requestIdValue) {
+  ensureSystemSheets_();
+  const ticker = validateTicker_(tickerValue);
+  const requestId = String(requestIdValue || '').trim();
+  const cached = readExpirationCacheRecord_(ticker);
+  if (!cached) return {status: 'FAILED', ticker, error: '找不到到期日查詢紀錄，請重新查詢'};
+  if (requestId && cached.requestId !== requestId) {
+    return {status: 'FAILED', ticker, error: '已有較新的到期日查詢，請重新載入'};
+  }
+  if (cached.status === 'PENDING'
+      && Date.now() - parseExpirationCacheTime_(cached.checkedAt) > APP.EXPIRATION_LOOKUP.PENDING_TTL_MS) {
+    return {status: 'FAILED', ticker, requestId: cached.requestId,
+      error: '到期日查詢等待超過 10 分鐘，請檢查 GitHub Actions 後按「重新查詢」'};
+  }
+  return buildExpirationLookupResult_(cached);
+}
+
+function refreshExpirationDates(tickerValue) {
+  ensureSystemSheets_();
+  const ticker = validateTicker_(tickerValue);
+  const cached = readExpirationCacheRecord_(ticker);
+  if (cached) cached.checkedAt = '';
+  upsertExpirationCacheRecord_({
+    ticker,
+    status: 'EXPIRED',
+    requestId: cached ? cached.requestId : '',
+    checkedAt: '',
+    expirations: [],
+    error: '',
+  });
+  return requestExpirationDates(ticker);
+}
+
 function submitScan(payload) {
   const input = validateScanInput_(payload || {});
+  const result = saveScanInputs_([input], true);
+  return {
+    ok: true,
+    scanId: input.scanId,
+    sheetName: input.sheetName,
+    message: result.added.length
+      ? '掃描已新增；第二門檻首次符合會即時通知，第一門檻於正式收盤彙總。'
+      : '掃描設定已更新；條件變更會在下一次更新套用。',
+  };
+}
+
+function submitScans(payload) {
+  const source = payload || {};
+  const expiries = [...new Set((Array.isArray(source.expiries) ? source.expiries : [])
+    .map(value => String(value || '').trim()).filter(Boolean))].sort();
+  if (!expiries.length) throw new Error('請至少選擇一個到期日');
+  const ticker = validateTicker_(source.ticker);
+  const cached = readExpirationCacheRecord_(ticker);
+  const age = cached ? Date.now() - parseExpirationCacheTime_(cached.checkedAt) : Infinity;
+  if (!cached || cached.status !== 'SUCCESS' || age > APP.EXPIRATION_LOOKUP.CACHE_TTL_MS) {
+    throw new Error('到期日清單已過期，請重新查詢後再儲存');
+  }
+  const available = new Set(cached.expirations);
+  expiries.forEach(expiry => {
+    if (!available.has(expiry)) throw new Error(`${expiry} 已不在 Yahoo 目前提供的到期日清單中`);
+    const dte = expirationDte_(expiry);
+    if (dte < 0 || dte > APP.EXPIRATION_LOOKUP.MAX_DTE) {
+      throw new Error(`${expiry} 不在未來一年內`);
+    }
+  });
+  const inputs = expiries.map(expiry => validateScanInput_({...source, ticker, expiry}));
+  const result = saveScanInputs_(inputs, source.updateExisting === true);
+  return {
+    ok: true,
+    ...result,
+    message: `完成：新增 ${result.added.length} 筆、更新 ${result.updated.length} 筆、略過 ${result.skipped.length} 筆`,
+  };
+}
+
+function saveScanInputs_(inputs, updateExisting) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(30000);
   try {
     ensureSystemSheets_();
-    const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SCANS);
+    const spreadsheet = getSpreadsheet_();
+    const sheet = spreadsheet.getSheetByName(APP.SHEETS.SCANS);
     const values = sheet.getDataRange().getValues();
     const idColumn = APP.SCAN_HEADERS.indexOf('掃描ID');
-    let rowNumber = -1;
-    let firstAvailableRow = -1;
+    const existingRows = new Map();
+    const availableRows = [];
     for (let row = 1; row < values.length; row += 1) {
-      if (String(values[row][idColumn] || '') === input.scanId) {
-        rowNumber = row + 1;
-        break;
-      }
-      if (firstAvailableRow === -1 && !hasScanData_(values[row])) {
-        firstAvailableRow = row + 1;
-      }
+      const scanId = String(values[row][idColumn] || '');
+      if (scanId) existingRows.set(scanId, row + 1);
+      else if (!hasScanData_(values[row])) availableRows.push(row + 1);
     }
+    const added = [];
+    const updated = [];
+    const skipped = [];
+    const writes = [];
+    let nextRow = Math.max(sheet.getLastRow() + 1, 2);
+    inputs.forEach(input => {
+      const existingRow = existingRows.get(input.scanId);
+      if (existingRow && !updateExisting) {
+        skipped.push(input.scanId);
+        return;
+      }
+      const rowNumber = existingRow || availableRows.shift() || nextRow++;
+      writes.push({rowNumber, input});
+      if (existingRow) updated.push(input.scanId);
+      else added.push(input.scanId);
+    });
+    if (!writes.length) return {added, updated, skipped, sheets: []};
 
-    const inputValues = [[
-      true, input.scanId, input.ticker, input.expiry, input.displayType,
-      input.first.enabled, input.first.deltaOperator, input.first.deltaThreshold ?? '',
-      input.first.spreadOperator, input.first.spreadThreshold ?? '',
-      input.first.annualReturnOperator, input.first.annualReturnThreshold ?? '', input.first.openInterestMin ?? '',
-      input.second.enabled, input.second.deltaOperator, input.second.deltaThreshold ?? '',
-      input.second.spreadOperator, input.second.spreadThreshold ?? '',
-      input.second.annualReturnOperator, input.second.annualReturnThreshold ?? '', input.second.openInterestMin ?? '',
-      input.callCostBasis ?? '', input.emailEnabled, input.note,
-    ]];
-
-    const isNew = rowNumber === -1;
-    if (isNew) rowNumber = firstAvailableRow === -1
-      ? Math.max(sheet.getLastRow() + 1, 2)
-      : firstAvailableRow;
-    if (rowNumber > sheet.getMaxRows()) {
-      sheet.insertRowsAfter(sheet.getMaxRows(), rowNumber - sheet.getMaxRows());
+    const missingSheetNames = [...new Set(writes.map(item => item.input.sheetName))]
+      .filter(name => !spreadsheet.getSheetByName(name));
+    if (spreadsheet.getSheets().length + missingSheetNames.length > 200) {
+      throw new Error(`新增後會超過 Google Sheet 的 200 張工作表上限；本次需要再建立 ${missingSheetNames.length} 張`);
     }
-    sheet.getRange(rowNumber, 1, 1, APP.SCAN_HEADERS.length).clearContent();
-    sheet.getRange(rowNumber, 1, 1, inputValues[0].length).setValues(inputValues);
-    const output = Object.fromEntries(APP.SCAN_HEADERS.map((header, index) => [header, index + 1]));
-    sheet.getRange(rowNumber, output['狀態']).setValue('待抓取');
-    sheet.getRange(rowNumber, output['資料狀態']).setValue('等待雲端更新');
-    sheet.getRange(rowNumber, output['工作表']).setValue(input.sheetName);
+    const maxRow = Math.max(...writes.map(item => item.rowNumber));
+    if (maxRow > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), maxRow - sheet.getMaxRows());
+    writes.forEach(({rowNumber, input}) => {
+      const row = buildScanRow_(input);
+      sheet.getRange(rowNumber, 1, 1, APP.SCAN_HEADERS.length).setValues([row]);
+    });
     applyScanFormatting_();
-    ensureChainSheet_(input.sheetName);
+    [...new Set(writes.map(item => item.input.sheetName))].forEach(ensureChainSheet_);
     prepareNextRefresh_();
-
-    return {
-      ok: true,
-      scanId: input.scanId,
-      sheetName: input.sheetName,
-      message: isNew
-        ? '掃描已新增；第二門檻首次符合會即時通知，第一門檻於正式收盤彙總。'
-        : '掃描設定已更新；條件變更會在下一次更新套用。',
-    };
+    return {added, updated, skipped, sheets: writes.map(item => item.input.sheetName)};
   } finally {
     lock.releaseLock();
   }
+}
+
+function buildScanRow_(input) {
+  const row = Array(APP.SCAN_HEADERS.length).fill('');
+  const inputValues = [
+    true, input.scanId, input.ticker, input.expiry, input.displayType,
+    input.first.enabled, input.first.deltaOperator, input.first.deltaThreshold ?? '',
+    input.first.spreadOperator, input.first.spreadThreshold ?? '',
+    input.first.annualReturnOperator, input.first.annualReturnThreshold ?? '', input.first.openInterestMin ?? '',
+    input.second.enabled, input.second.deltaOperator, input.second.deltaThreshold ?? '',
+    input.second.spreadOperator, input.second.spreadThreshold ?? '',
+    input.second.annualReturnOperator, input.second.annualReturnThreshold ?? '', input.second.openInterestMin ?? '',
+    input.callCostBasis ?? '', input.emailEnabled, input.note,
+  ];
+  inputValues.forEach((value, index) => { row[index] = value; });
+  row[APP.SCAN_HEADERS.indexOf('狀態')] = '待抓取';
+  row[APP.SCAN_HEADERS.indexOf('資料狀態')] = '等待雲端更新';
+  row[APP.SCAN_HEADERS.indexOf('工作表')] = input.sheetName;
+  return row;
 }
 
 function setupSystem() {
@@ -299,13 +429,23 @@ function processPendingEmails() {
 function buildQueueEmail_(eventType, payload, spreadsheetUrl) {
   const close = eventType.indexOf('FIRST_CLOSE') === 0;
   const supplement = eventType === 'FIRST_CLOSE_SUPPLEMENT';
-  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  const sourceGroups = Array.isArray(payload.groups) ? payload.groups : [];
+  const groups = (close ? sourceGroups.filter(group => (group.items || []).length > 0) : sourceGroups)
+    .slice()
+    .sort((left, right) => {
+      const tickerOrder = String(left.ticker || '').localeCompare(String(right.ticker || ''), 'en');
+      return tickerOrder || String(left.expiry || '').localeCompare(String(right.expiry || ''));
+    });
   const total = groups.reduce((sum, group) => sum + (group.items || []).length, 0);
   const subject = close
     ? `【選擇權收盤通知】${payload.market_date || ''}${supplement ? '（補充）' : ''}：${total} 個符合第一門檻`
     : `【選擇權即時通知】${groups[0]?.ticker || ''} ${groups[0]?.expiry || ''}：${total} 個符合第二門檻`;
   const lines = [subject.replace('【選擇權收盤通知】', '').replace('【選擇權即時通知】', ''), ''];
   const htmlSections = [];
+  if (close && !groups.length) {
+    lines.push('本日收盤無符合第一門檻的合約。');
+    htmlSections.push('<p>本日收盤無符合第一門檻的合約。</p>');
+  }
   groups.forEach(group => {
     const items = group.items || [];
     const baseline = group.baseline_changed ? '（條件已變更，本日重建比較基準）' : '';
@@ -614,11 +754,100 @@ function reconcileAlertLogs_(forceCurrent) {
   return reconcileSentAlertLogs_() + reconcileCurrentMatchLogs_(Boolean(forceCurrent));
 }
 
+function validateTicker_(tickerValue) {
+  const ticker = String(tickerValue || '').trim().toUpperCase();
+  if (!/^[A-Z0-9.^-]{1,15}$/.test(ticker)) throw new Error('股票代號格式不正確');
+  return ticker;
+}
+
+function readExpirationCacheRecord_(ticker) {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.EXPIRATION_CACHE);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, APP.EXPIRATION_CACHE_HEADERS.length).getValues();
+  const row = rows.find(item => String(item[0] || '').trim().toUpperCase() === ticker);
+  if (!row) return null;
+  let expirations = [];
+  try {
+    const parsed = JSON.parse(String(row[4] || '[]'));
+    expirations = Array.isArray(parsed) ? parsed.map(String).filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value)) : [];
+  } catch (error) {
+    expirations = [];
+  }
+  return {
+    ticker,
+    status: String(row[1] || ''),
+    requestId: String(row[2] || ''),
+    checkedAt: row[3] || '',
+    expirations: [...new Set(expirations)].sort(),
+    error: String(row[6] || ''),
+  };
+}
+
+function upsertExpirationCacheRecord_(record) {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.EXPIRATION_CACHE);
+  const rows = sheet.getLastRow() >= 2
+    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat()
+    : [];
+  const index = rows.findIndex(value => String(value || '').trim().toUpperCase() === record.ticker);
+  const rowNumber = index >= 0 ? index + 2 : Math.max(sheet.getLastRow() + 1, 2);
+  sheet.getRange(rowNumber, 1, 1, APP.EXPIRATION_CACHE_HEADERS.length).setValues([[
+    record.ticker,
+    record.status,
+    record.requestId || '',
+    record.checkedAt || '',
+    JSON.stringify(record.expirations || []),
+    (record.expirations || []).length,
+    String(record.error || '').slice(0, 1000),
+  ]]);
+}
+
+function parseExpirationCacheTime_(value) {
+  if (value instanceof Date) return value.getTime();
+  const parsed = new Date(String(value || '')).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function expirationDte_(expiry) {
+  const marketToday = Utilities.formatDate(new Date(), APP.MARKET_TIMEZONE, 'yyyy-MM-dd');
+  const start = new Date(`${marketToday}T12:00:00Z`).getTime();
+  const finish = new Date(`${expiry}T12:00:00Z`).getTime();
+  return Math.round((finish - start) / (24 * 60 * 60 * 1000));
+}
+
+function existingScanIds_(ticker) {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SCANS);
+  if (!sheet || sheet.getLastRow() < 2) return new Set();
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, APP.SCAN_HEADERS.length).getValues();
+  const tickerIndex = APP.SCAN_HEADERS.indexOf('股票代號');
+  const idIndex = APP.SCAN_HEADERS.indexOf('掃描ID');
+  return new Set(values
+    .filter(row => String(row[tickerIndex] || '').trim().toUpperCase() === ticker)
+    .map(row => String(row[idIndex] || '').trim()).filter(Boolean));
+}
+
+function buildExpirationLookupResult_(record) {
+  if (!record) return {status: 'FAILED', error: '找不到到期日查詢紀錄'};
+  const result = {
+    status: record.status,
+    ticker: record.ticker,
+    requestId: record.requestId,
+    checkedAt: record.checkedAt instanceof Date ? record.checkedAt.toISOString() : String(record.checkedAt || ''),
+    error: record.error,
+    expirations: [],
+  };
+  if (record.status !== 'SUCCESS') return result;
+  const existing = existingScanIds_(record.ticker);
+  result.expirations = record.expirations
+    .map(expiry => ({date: expiry, dte: expirationDte_(expiry), existing: existing.has(`${record.ticker}|${expiry}`)}))
+    .filter(item => item.dte >= 0 && item.dte <= APP.EXPIRATION_LOOKUP.MAX_DTE)
+    .sort((left, right) => left.date.localeCompare(right.date));
+  return result;
+}
+
 function validateScanInput_(payload) {
-  const ticker = String(payload.ticker || '').trim().toUpperCase();
+  const ticker = validateTicker_(payload.ticker);
   const expiry = String(payload.expiry || '').trim();
   const displayType = String(payload.displayType || 'ALL').trim().toUpperCase();
-  if (!/^[A-Z0-9.^-]{1,15}$/.test(ticker)) throw new Error('股票代號格式不正確');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry) || isNaN(new Date(`${expiry}T12:00:00Z`).getTime())) {
     throw new Error('到期日格式不正確');
   }
@@ -704,6 +933,7 @@ function ensureSystemSheets_() {
     [APP.SHEETS.CLOSE_TRENDS, APP.CLOSE_TREND_HEADERS],
     [APP.SHEETS.QUEUE, APP.QUEUE_HEADERS],
     [APP.SHEETS.CLOSE_STATE, APP.CLOSE_STATE_HEADERS],
+    [APP.SHEETS.EXPIRATION_CACHE, APP.EXPIRATION_CACHE_HEADERS],
   ];
   definitions.forEach(([name, headers]) => {
     let sheet = spreadsheet.getSheetByName(name);
@@ -718,8 +948,10 @@ function ensureSystemSheets_() {
   seedDashboard_();
   const queue = spreadsheet.getSheetByName(APP.SHEETS.QUEUE);
   const closeState = spreadsheet.getSheetByName(APP.SHEETS.CLOSE_STATE);
+  const expirationCache = spreadsheet.getSheetByName(APP.SHEETS.EXPIRATION_CACHE);
   if (queue) queue.hideSheet();
   if (closeState) closeState.hideSheet();
+  if (expirationCache) expirationCache.hideSheet();
 }
 
 function migrateScanSchema070_(spreadsheet) {
@@ -952,7 +1184,7 @@ function seedDashboard_() {
   sheet.getRange('A13:A18').setValues([
     ['1. 從選單「選擇權警示」執行「初始化／升級系統」。'],
     ['2. 在「設定」確認固定通知信箱，再從選單設定 90 天 GitHub 金鑰。'],
-    ['3. 用表單輸入股票、到期日及選填條件；程式會列出 Yahoo 回傳的完整期權鍊。'],
+    ['3. 表單輸入股票後可勾選未來一年內多個到期日，並套用同一組掃描條件。'],
     ['4. 開盤、盤中整點與收盤自動更新；正式收盤會同步保存 Delta 0.10／0.15／0.20 趨勢。'],
     ['5. 第一門檻每天收盤彙總全部符合項目；第二門檻首次符合時即時通知。'],
     ['6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。'],
@@ -1418,11 +1650,13 @@ function scheduledMarketEventKey_(now) {
   return '';
 }
 
-function dispatchGitHubWorkflow_(mode) {
+function dispatchGitHubWorkflow_(mode, options) {
   const properties = PropertiesService.getUserProperties();
   const token = properties.getProperty(APP.PROPERTIES.TOKEN);
   if (!token) throw new Error('尚未設定 GitHub 金鑰；請從選單執行「設定 GitHub 自動更新金鑰」');
   const now = new Date();
+  const job = options || {};
+  const operation = job.operation || (mode === 'expiration_lookup' ? 'expiration_lookup' : 'refresh');
   let response;
   try {
     response = UrlFetchApp.fetch(`${gitHubWorkflowUrl_()}/dispatches`, {
@@ -1431,7 +1665,12 @@ function dispatchGitHubWorkflow_(mode) {
       headers: gitHubHeaders_(token),
       payload: JSON.stringify({
         ref: APP.GITHUB.REF,
-        inputs: {force: mode === 'manual' ? 'true' : 'false'},
+        inputs: {
+          force: mode === 'manual' ? 'true' : 'false',
+          operation,
+          ticker: job.ticker || '',
+          request_id: job.requestId || '',
+        },
       }),
       muteHttpExceptions: true,
     });

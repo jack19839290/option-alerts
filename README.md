@@ -1,6 +1,6 @@
 # 選擇權警示
 
-目前版本：`0.7.3`
+目前版本：`0.8.0`
 
 以 Google Sheets 作為操作介面，GitHub Actions 透過 `yfinance` 讀取 Yahoo Finance 選擇權鏈，計算 Greeks 與賣出權利金年化報酬率，再把結果寫回試算表。Email 由綁定試算表的 Apps Script 寄出。
 
@@ -9,6 +9,8 @@
 - 一個「股票＋到期日」對應一張期權鍊工作表，顯示 Yahoo／`yfinance` 當次回傳的所有 CALL、PUT 與履約價。
 - 可選擇顯示全部合約、只顯示 CALL 或只顯示 PUT。
 - 可設定兩組互相獨立的 Delta、Bid–Ask Spread、年化報酬率與未平倉量條件；每組已設定條件採 AND 邏輯。
+- 新增掃描時會透過 GitHub Actions 查詢 Yahoo 到期日，顯示未來一年內的日期與 DTE，並可將同一組條件一次套用至多個到期日；既有掃描預設略過。
+- 每日收盤 Email 依股票代號及到期日排序，沒有符合合約的股票／到期日不顯示空表格；全部為 0 筆時仍寄出簡短通知。
 - Delta 條件實際比較 `|Delta|` 絕對值；Delta、Spread 與年化報酬率可選擇 `≥` 或 `≤`，未平倉量採嚴格大於設定口數。
 - `Spread% = (Ask − Bid) ÷ Mid`；表單輸入 `10` 代表 10%。Bid、Ask 或 Mid 無效時，Spread 條件視為資料不足。
 - 賣出試算價只使用有效 Bid；Bid 無效時不以 Last 代替，也不計算年化報酬率。
@@ -37,7 +39,11 @@
 - 收盤門檻歷史每次執行只讀取一次，並對 Google Sheets API `429` 短暫限流自動等待後重試。
 - 部分成功不會冒充完整成功；收盤會逐掃描記錄完成狀態並重試失敗項目。正式收盤失敗後，同一美東交易日晚間的手動更新可補建收盤快照，並標示「延後補抓」。市場行事曆無法確認時會明確停止自動警示。
 
-## 升級至 0.7.3
+## 升級至 0.8.0
+
+請依 [UPGRADE_0.8.md](UPGRADE_0.8.md) 更新 Apps Script 並執行一次初始化。0.8.0 新增 Yahoo 到期日查詢、多到期日批次建立，以及收盤 Email 排序與零筆群組隱藏。
+
+## 0.7.3
 
 請依照 [UPGRADE_0.7.md](UPGRADE_0.7.md) 操作。執行 Apps Script 的 `setupSystem` 時：
 
@@ -56,6 +62,7 @@ scripts/             Google Sheets 範本產生器
 tests/               定價、Greeks、條件、基準與更新流程測試
 GITHUB_ACTIONS.md     GitHub Actions 免費部署與授權步驟
 UPGRADE_0.7.md        0.7.3 升級與驗證說明
+UPGRADE_0.8.md        0.8.0 升級與驗證說明
 UPGRADE_0.5.md        0.5.1 舊版升級說明
 DEPLOYMENT.md         選用的 Cloud Run 部署步驟
 ```

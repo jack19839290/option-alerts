@@ -12,6 +12,8 @@ from .constants import (
     CLOSE_ALERT_STATE_SHEET,
     CLOSE_TREND_HEADERS,
     CLOSE_TREND_SHEET,
+    EXPIRATION_CACHE_HEADERS,
+    EXPIRATION_CACHE_SHEET,
     NOTIFICATION_QUEUE_HEADERS,
     NOTIFICATION_QUEUE_SHEET,
     SCAN_HEADERS,
@@ -572,6 +574,68 @@ class SheetsRepository:
                 ]
             },
         ).execute()
+
+    def store_expiration_lookup(
+        self,
+        *,
+        ticker: str,
+        request_id: str,
+        status: str,
+        checked_at: datetime,
+        expirations: list[date] | None = None,
+        error: str = "",
+    ) -> bool:
+        """Finish one expiration lookup without overwriting a newer request."""
+        self._ensure_sheets([EXPIRATION_CACHE_SHEET], min_columns=len(EXPIRATION_CACHE_HEADERS))
+        self._ensure_header(EXPIRATION_CACHE_SHEET, EXPIRATION_CACHE_HEADERS)
+        end_col = _column_name(len(EXPIRATION_CACHE_HEADERS))
+        response = self._execute(
+            self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=_sheet_range(EXPIRATION_CACHE_SHEET, f"A2:{end_col}"),
+                valueRenderOption="UNFORMATTED_VALUE",
+            )
+        )
+        row_number: int | None = None
+        for index, row in enumerate(response.get("values", []), start=2):
+            if str(row[0] if row else "").strip().upper() != ticker:
+                continue
+            existing_request_id = str(row[2] if len(row) > 2 else "").strip()
+            if existing_request_id and existing_request_id != request_id:
+                return False
+            row_number = index
+            break
+
+        dates = sorted({value.isoformat() for value in (expirations or [])})
+        values = [[
+            ticker,
+            status,
+            request_id,
+            checked_at.astimezone(timezone.utc).isoformat(),
+            json.dumps(dates, ensure_ascii=False, separators=(",", ":")),
+            len(dates),
+            error[:1000],
+        ]]
+        if row_number is None:
+            self._execute(
+                self.service.spreadsheets().values().append(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=_sheet_range(EXPIRATION_CACHE_SHEET, f"A:{end_col}"),
+                    valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS",
+                    body={"values": values},
+                )
+            )
+        else:
+            self._execute(
+                self.service.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=_sheet_range(EXPIRATION_CACHE_SHEET, f"A{row_number}:{end_col}{row_number}"),
+                    valueInputOption="RAW",
+                    body={"values": values},
+                )
+            )
+        return True
 
     def _ensure_header(self, sheet_name: str, headers: list[str]) -> None:
         cache_key = (sheet_name, tuple(headers))
