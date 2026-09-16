@@ -8,7 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .alerts import DISABLED, evaluate_conditions, evaluate_contract_alert, overall_result
-from .close_trends import build_close_trend_rows, resolve_market_close
+from .close_trends import build_close_trend_rows, build_volatility_trend_rows, resolve_market_close
 from .greeks import calculate_greeks, time_to_expiry_years
 from .market_clock import MarketCalendarError, get_us_option_session_state
 from .models import ScanRecord, as_bool
@@ -365,8 +365,6 @@ class RefreshService:
 
         self.repository.update_scan_outputs(headers, scans, updates)
         self._append_events(realtime_events)
-        if capture_close:
-            self._upsert_close_records(close_records)
         self.repository.write_chain_sheets(scans, chain_rows)
 
         close_trend_count = 0
@@ -375,7 +373,13 @@ class RefreshService:
                                                 market_close=close_time, captured_at=now,
                                                 market_timezone=market_timezone, risk_free_rate_source=rate_source)
             self.repository.upsert_close_trend_rows(trend_rows)
+            volatility_rows = build_volatility_trend_rows(scans=active, chain_rows=chain_rows,
+                scan_updates=updates, market_close=close_time, captured_at=now, market_timezone=market_timezone)
+            self.repository.upsert_volatility_trend_rows(volatility_rows)
             close_trend_count = len(trend_rows)
+        if capture_close:
+            # Mark completion only after both historical worksheets are saved.
+            self._upsert_close_records(close_records)
 
         if rate_limit_error:
             return self._rate_limited(settings, now, rate_limit_error, already_written=True)

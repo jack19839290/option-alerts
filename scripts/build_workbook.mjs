@@ -16,6 +16,7 @@ const settings = workbook.worksheets.add("設定");
 const alertLog = workbook.worksheets.add("警示紀錄");
 const systemLog = workbook.worksheets.add("系統紀錄");
 const closeTrend = workbook.worksheets.add("收盤Delta趨勢");
+const volatilityTrend = workbook.worksheets.add("波動率趨勢");
 const queue = workbook.worksheets.add("通知佇列");
 const closeState = workbook.worksheets.add("收盤門檻紀錄");
 const expirationCache = workbook.worksheets.add("到期日快取");
@@ -48,6 +49,20 @@ const closeTrendHeaders = [
   "無風險利率來源", "股息殖利率", "Greeks模型", "資料狀態", "備註／未選取原因",
   "標的－履約價差", "標的－履約價差率",
 ];
+
+const volatilityTrendHeaders = [
+  "美東交易日", "股票代號", "到期日", "類型", "DTE", "標的快照價",
+  "10Δ IV", "25Δ IV", "ATM IV", "10Δ − 25Δ", "10Δ − ATM", "資料狀態",
+  "官方收盤時間(UTC)", "實際抓取時間(UTC)", "IV取樣說明", "快照ID",
+];
+volatilityTrend.getRange("A1:P1").values = [volatilityTrendHeaders];
+volatilityTrend.getRange("A1:P1").format = {fill: "#DBEAFE", font: {bold: true}, wrapText: true};
+volatilityTrend.getRange("A:P").format.columnWidthPx = 115;
+volatilityTrend.getRange("G:I").format.numberFormat = "0.00%";
+volatilityTrend.getRange("J:K").format.numberFormat = '0.00" 點"';
+volatilityTrend.getRange("M:N").format.numberFormat = "yyyy-mm-dd hh:mm:ss";
+volatilityTrend.freezePanes.freezeRows(1);
+volatilityTrend.freezePanes.freezeColumns(4);
 
 const expirationCacheHeaders = [
   "股票代號", "狀態", "查詢ID", "查詢時間(UTC)", "到期日JSON", "到期日數量", "錯誤訊息",
@@ -302,7 +317,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.8.0", "目前規格版本"],
+  ["系統版本", "0.9.0", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],

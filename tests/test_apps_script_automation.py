@@ -10,12 +10,12 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 class AppsScriptAutomationTests(unittest.TestCase):
     def test_version_is_0_8_0_everywhere(self):
-        self.assertIn("VERSION: '0.8.0'", CODE)
-        self.assertIn('version = "0.8.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.8.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
-        self.assertIn('["系統版本", "0.8.0", "目前規格版本"]',
+        self.assertIn("VERSION: '0.9.0'", CODE)
+        self.assertIn('version = "0.9.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.9.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+        self.assertIn('["系統版本", "0.9.0", "目前規格版本"]',
                       (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8"))
-        self.assertIn('目前版本：`0.8.0`', (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('目前版本：`0.9.0`', (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
         self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)

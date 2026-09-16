@@ -73,6 +73,59 @@ def _premium_return(row: dict[str, Any]) -> float | None:
     return premium / capital
 
 
+def volatility_summary(rows: list[dict[str, Any]], option_type: str) -> dict[str, Any]:
+    """Same-expiry, same-side IV interpolation; never extrapolate missing wings."""
+    valid = []
+    for row in rows:
+        iv, bid, ask, spot, strike, dte = (
+            _optional_float(row.get(key))
+            for key in ("IV", "Bid", "Ask", "標的股價", "履約價", "DTE")
+        )
+        if (row.get("類型") != option_type or row.get("資料狀態") != "正常"
+                or any(x is None for x in (iv, bid, ask, spot, strike, dte))):
+            continue
+        if iv <= 0.00001 or bid <= 0 or ask < bid or spot <= 0 or strike <= 0 or dte <= 0:
+            continue
+        valid.append(row)
+
+    def sample(key: str, target: float, candidates: list[dict[str, Any]]) -> tuple[float | None, str]:
+        points = {}
+        # Tightest spread then symbol gives a deterministic duplicate choice.
+        for row in sorted(candidates, key=lambda r: (
+            (r["Ask"] - r["Bid"]) / ((r["Ask"] + r["Bid"]) / 2),
+            str(r.get("合約代號", "")),
+        )):
+            x = _optional_float(row.get(key))
+            if x is not None:
+                points.setdefault(x, row)
+        exact = next((x for x in points if abs(x - target) < 1e-12), None)
+        if exact is not None:
+            row = points[exact]
+            return float(row["IV"]), str(row.get("合約代號", ""))
+        lower = max((x for x in points if x < target), default=None)
+        upper = min((x for x in points if x > target), default=None)
+        if lower is None or upper is None:
+            return None, "缺少有效包夾合約"
+        left, right = points[lower], points[upper]
+        weight = (target - lower) / (upper - lower)
+        value = float(left["IV"]) * (1 - weight) + float(right["IV"]) * weight
+        return value, f"內插 {left.get('合約代號', '')}/{right.get('合約代號', '')} ({lower:.4f}/{upper:.4f})"
+
+    otm = [r for r in valid if (
+        r["履約價"] <= r["標的股價"] if option_type == "PUT"
+        else r["履約價"] >= r["標的股價"]
+    ) and 0 < (_optional_float(r.get("|Delta|")) or 0) < 1]
+    iv10, note10 = sample("|Delta|", 0.10, otm)
+    iv25, note25 = sample("|Delta|", 0.25, otm)
+    atm, note_atm = sample("履約價", float(valid[0]["標的股價"]), valid) if valid else (None, "無有效資料")
+    return {
+        "10Δ IV": iv10, "25Δ IV": iv25, "ATM IV": atm,
+        "10Δ − 25Δ": (iv10 - iv25) * 100 if iv10 is not None and iv25 is not None else None,
+        "10Δ − ATM": (iv10 - atm) * 100 if iv10 is not None and atm is not None else None,
+        "IV取樣說明": f"{option_type}同到期日；10Δ: {note10}；25Δ: {note25}；ATM: {note_atm}；差值單位：波動率點",
+    }
+
+
 def _base_row(
     *,
     scan: ScanRecord,
@@ -214,4 +267,29 @@ def build_close_trend_rows(
                     }
                 )
                 result.append(output)
+    return result
+
+
+def build_volatility_trend_rows(*, scans, chain_rows, scan_updates, market_close,
+                               captured_at, market_timezone):
+    market_date = market_close.astimezone(ZoneInfo(market_timezone)).date().isoformat()
+    result = []
+    for scan in scans:
+        if not scan.enabled:
+            continue
+        rows = chain_rows.get(scan.scan_id, [])
+        for side in _option_types(scan):
+            summary = volatility_summary(rows, side)
+            complete = all(summary[key] is not None for key in ("10Δ IV", "25Δ IV", "ATM IV"))
+            spot = next((_optional_float(r.get("標的股價")) for r in rows
+                         if _optional_float(r.get("標的股價")) is not None), None)
+            result.append({
+                "快照ID": f"{market_date}|{scan.scan_id}|{side}",
+                "美東交易日": market_date, "股票代號": scan.ticker, "到期日": scan.expiry,
+                "類型": side, "DTE": (scan.expiry - market_close.astimezone(ZoneInfo(market_timezone)).date()).days,
+                "標的快照價": spot, **summary,
+                "資料狀態": "正常" if complete else (scan_updates.get(scan.scan_id, {}).get("錯誤訊息") or "IV資料不足"),
+                "官方收盤時間(UTC)": market_close.astimezone(timezone.utc),
+                "實際抓取時間(UTC)": captured_at.astimezone(timezone.utc),
+            })
     return result

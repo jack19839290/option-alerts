@@ -22,6 +22,8 @@ from .constants import (
     SETTINGS_DEFAULTS,
     SETTINGS_SHEET,
     SYSTEM_LOG_SHEET,
+    VOLATILITY_TREND_SHEET,
+    VOLATILITY_TREND_HEADERS,
 )
 from .models import ScanRecord
 
@@ -395,6 +397,39 @@ class SheetsRepository:
                 insertDataOption="INSERT_ROWS",
                 body={"values": appends},
             ).execute()
+
+    def upsert_volatility_trend_rows(self, rows: list[dict[str, Any]]) -> None:
+        """Preserve complete daily snapshots; replace incomplete rows on recovery."""
+        if not rows:
+            return
+        name, headers = VOLATILITY_TREND_SHEET, VOLATILITY_TREND_HEADERS
+        self._ensure_sheets([name], min_columns=len(headers))
+        self._ensure_header(name, headers)
+        api = self.service.spreadsheets().values()
+        old = self._execute(api.get(spreadsheetId=self.spreadsheet_id,
+            range=_sheet_range(name, "A2:P"), valueRenderOption="UNFORMATTED_VALUE"))
+        existing = {str(row[15]): (i, row[11]) for i, row in enumerate(old.get("values", []), 2)
+                    if len(row) >= 16 and row[15]}
+        appends, updates, seen = [], [], set()
+        for row in rows:
+            key = row["快照ID"]
+            if key in seen:
+                continue
+            seen.add(key)
+            prior = existing.get(key)
+            if prior and prior[1] == "正常":
+                continue
+            values = [self._serializable(row.get(h), h) for h in headers]
+            if prior:
+                updates.append({"range": _sheet_range(name, f"A{prior[0]}:P{prior[0]}"), "values": [values]})
+            else:
+                appends.append(values)
+        if updates:
+            self._execute(api.batchUpdate(spreadsheetId=self.spreadsheet_id,
+                body={"valueInputOption": "RAW", "data": updates}))
+        if appends:
+            self._execute(api.append(spreadsheetId=self.spreadsheet_id, range=_sheet_range(name, "A:P"),
+                valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": appends}))
 
     def append_notification_events(self, events: list[dict[str, Any]]) -> None:
         if not events:

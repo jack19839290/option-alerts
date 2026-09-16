@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from app.constants import ALERT_LOG_HEADERS, CHAIN_HEADERS, CLOSE_ALERT_STATE_HEADERS, CLOSE_TREND_HEADERS, EXPIRATION_CACHE_HEADERS, SCAN_HEADERS
+from app.constants import VOLATILITY_TREND_HEADERS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,14 @@ def quoted_values(block: str) -> list[str]:
 
 
 class SchemaConsistencyTests(unittest.TestCase):
+    def test_volatility_headers_match(self):
+        code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8")
+        app_block = re.search(r"VOLATILITY_TREND_HEADERS:\s*\[(.*?)\]\s*,", code, re.S)
+        template_block = re.search(r"const volatilityTrendHeaders = \[(.*?)\];", builder, re.S)
+        self.assertEqual(quoted_values(app_block.group(1)), VOLATILITY_TREND_HEADERS)
+        self.assertEqual(quoted_values(template_block.group(1)), VOLATILITY_TREND_HEADERS)
+
     def test_python_apps_script_and_template_scan_headers_match(self):
         code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
         builder = (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8")

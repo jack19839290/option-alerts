@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.8.0',
+  VERSION: '0.9.0',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -7,6 +7,7 @@ const APP = Object.freeze({
     ALERTS: '警示紀錄',
     SYSTEM: '系統紀錄',
     CLOSE_TRENDS: '收盤Delta趨勢',
+    VOLATILITY_TRENDS: '波動率趨勢',
     QUEUE: '通知佇列',
     CLOSE_STATE: '收盤門檻紀錄',
     EXPIRATION_CACHE: '到期日快取',
@@ -71,6 +72,11 @@ const APP = Object.freeze({
     'Theta估算(每日)', 'Vega估算(每1%)', '成交量', '未平倉', '最後成交時間', '無風險利率',
     '無風險利率來源', '股息殖利率', 'Greeks模型', '資料狀態', '備註／未選取原因',
     '標的－履約價差', '標的－履約價差率'
+  ],
+  VOLATILITY_TREND_HEADERS: [
+    '美東交易日', '股票代號', '到期日', '類型', 'DTE', '標的快照價',
+    '10Δ IV', '25Δ IV', 'ATM IV', '10Δ − 25Δ', '10Δ − ATM', '資料狀態',
+    '官方收盤時間(UTC)', '實際抓取時間(UTC)', 'IV取樣說明', '快照ID'
   ],
   QUEUE_HEADERS: ['事件ID', '事件類型', '狀態', '建立時間(UTC)', '寄送時間', '重試次數',
     '下次重試時間', '掃描ID', '股票代號', '到期日', '美東交易日', '是否完整', '失敗掃描',
@@ -333,6 +339,7 @@ function setupSystem() {
   applyAlertLogFormatting_();
   applyAllChainFormatting_();
   applyCloseTrendFormatting_();
+  applyVolatilityTrendFormatting_();
   refreshGitHubStatusSettings_();
   spreadsheet.toast(`系統已初始化／升級至 ${APP.VERSION}；工作表時間使用 ${displayTimezone}`, '選擇權警示', 7);
 }
@@ -931,6 +938,7 @@ function ensureSystemSheets_() {
     [APP.SHEETS.ALERTS, APP.ALERT_HEADERS],
     [APP.SHEETS.SYSTEM, ['時間(UTC)', '等級', '訊息', '詳細資料']],
     [APP.SHEETS.CLOSE_TRENDS, APP.CLOSE_TREND_HEADERS],
+    [APP.SHEETS.VOLATILITY_TRENDS, APP.VOLATILITY_TREND_HEADERS],
     [APP.SHEETS.QUEUE, APP.QUEUE_HEADERS],
     [APP.SHEETS.CLOSE_STATE, APP.CLOSE_STATE_HEADERS],
     [APP.SHEETS.EXPIRATION_CACHE, APP.EXPIRATION_CACHE_HEADERS],
@@ -1368,6 +1376,30 @@ function applyCloseTrendFormatting_() {
       .setBackground('#FEE2E2').setFontColor('#991B1B').setRanges([range]).build(),
   ];
   sheet.setConditionalFormatRules(rules);
+}
+
+function applyVolatilityTrendFormatting_() {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.VOLATILITY_TRENDS);
+  if (!sheet) return;
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(4);
+  sheet.getRange('A1:P1').setBackground('#DBEAFE').setFontWeight('bold').setWrap(true);
+  sheet.setColumnWidths(1, 16, 110);
+  sheet.getRange('F:F').setNumberFormat('0.00');
+  sheet.getRange('G:I').setNumberFormat('0.00%');
+  sheet.getRange('J:K').setNumberFormat('0.00" 點"');
+  sheet.getRange('M:N').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.setColumnWidth(12, 180);
+  sheet.setColumnWidths(13, 2, 175);
+  sheet.setColumnWidths(15, 2, 320);
+  sheet.getRange('G1:K1').setNotes([[
+    '同類型同到期日的有效價外合約，按 |Delta| 內插至 0.10；不外推。',
+    '同類型同到期日的有效價外合約，按 |Delta| 內插至 0.25；不外推。',
+    '同類型同到期日，按履約價內插至標的股價；不是30天固定期限IV。',
+    '(10Δ IV − 25Δ IV) × 100，單位為波動率點。',
+    '(10Δ IV − ATM IV) × 100，單位為波動率點。'
+  ]]);
+  if (!sheet.getFilter()) sheet.getRange(1, 1, sheet.getMaxRows(), 16).createFilter();
 }
 
 function hasScanData_(row) {

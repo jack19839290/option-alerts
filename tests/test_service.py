@@ -17,6 +17,7 @@ class FakeRepository:
         self.scan_updates = None
         self.chain_updates = None
         self.close_trend_updates = []
+        self.volatility_trend_updates = []
         self.notification_events = []
         self.close_records = {}
         self.previous_close = {}
@@ -40,6 +41,9 @@ class FakeRepository:
 
     def upsert_close_trend_rows(self, rows):
         self.close_trend_updates.extend(rows)
+
+    def upsert_volatility_trend_rows(self, rows):
+        self.volatility_trend_updates.extend(rows)
 
     def append_notification_events(self, events):
         self.notification_events.extend(events)
@@ -188,6 +192,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["close_update"], True)
         self.assertEqual(result["close_trend_rows"], 6)
         self.assertEqual(len(repository.close_trend_updates), 6)
+        self.assertEqual(len(repository.volatility_trend_updates), 2)
 
     def test_manual_refresh_after_failed_close_recovers_close_snapshot(self):
         scan = make_scan()
@@ -211,6 +216,7 @@ class ServiceTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "成功")
         self.assertFalse(result["close_update"])
+        self.assertEqual(repository.volatility_trend_updates, [])
         self.assertFalse(result["close_recovery"])
         self.assertEqual(result["close_trend_rows"], 0)
         self.assertEqual(repository.notification_events, [])
