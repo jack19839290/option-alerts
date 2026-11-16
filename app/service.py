@@ -322,7 +322,6 @@ class RefreshService:
                         if scan.first_threshold.enabled and scan.email_enabled:
                             close_groups.append({"scan_id": scan.scan_id, "ticker": scan.ticker,
                                                  "expiry": scan.expiry.isoformat(), "items": items,
-                                                 "all_matching_items": items,
                                                  "baseline_changed": baseline_changed})
 
         if rate_limit_error:

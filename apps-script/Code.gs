@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.9.0',
+  VERSION: '0.9.1',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -9,6 +9,7 @@ const APP = Object.freeze({
     CLOSE_TRENDS: '收盤Delta趨勢',
     VOLATILITY_TRENDS: '波動率趨勢',
     QUEUE: '通知佇列',
+    PAYLOADS: '通知內容分段',
     CLOSE_STATE: '收盤門檻紀錄',
     EXPIRATION_CACHE: '到期日快取',
   },
@@ -81,6 +82,7 @@ const APP = Object.freeze({
   QUEUE_HEADERS: ['事件ID', '事件類型', '狀態', '建立時間(UTC)', '寄送時間', '重試次數',
     '下次重試時間', '掃描ID', '股票代號', '到期日', '美東交易日', '是否完整', '失敗掃描',
     '內容JSON', '最後錯誤'],
+  PAYLOAD_HEADERS: ['內容ID', '分段序號', '內容'],
   CLOSE_STATE_HEADERS: ['記錄ID', '美東交易日', '掃描ID', '第一條件指紋', '狀態', '符合合約JSON',
     '最後嘗試時間(UTC)', '成功時間(UTC)', '錯誤訊息', '嘗試次數'],
   EXPIRATION_CACHE_HEADERS: ['股票代號', '狀態', '查詢ID', '查詢時間(UTC)', '到期日JSON',
@@ -391,6 +393,7 @@ function processPendingEmails() {
     const values = queue.getDataRange().getValues();
     const map = Object.fromEntries(values[0].map((header, index) => [header, index]));
     const now = new Date();
+    const readPayload = createNotificationPayloadReader_();
     for (let index = 1; index < values.length; index += 1) {
       const row = values[index];
       const currentStatus = String(row[map['狀態']] || '');
@@ -405,7 +408,7 @@ function processPendingEmails() {
       queue.getRange(rowNumber, map['寄送時間'] + 1).setValue(now);
       SpreadsheetApp.flush();
       try {
-        const payload = JSON.parse(String(row[map['內容JSON']] || '{}'));
+        const payload = readPayload(row[map['內容JSON']]);
         const eventType = String(row[map['事件類型']] || '');
         const message = buildQueueEmail_(eventType, payload, spreadsheet.getUrl());
         MailApp.sendEmail({to: recipient, subject: message.subject, body: message.body,
@@ -431,6 +434,41 @@ function processPendingEmails() {
   } finally {
     lock.releaseLock();
   }
+}
+
+function createNotificationPayloadReader_() {
+  let chunksById = null;
+  return raw => {
+    const payload = JSON.parse(String(raw || '{}'));
+    if (payload.storage !== 'chunks-v1') return payload;
+    if (!Number.isInteger(payload.chunk_count) || payload.chunk_count < 1
+        || !Number.isInteger(payload.length) || payload.length < 1 || !payload.payload_id) {
+      throw new Error('通知內容分段索引無效');
+    }
+    if (chunksById === null) {
+      chunksById = new Map();
+      const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.PAYLOADS);
+      if (!sheet) throw new Error('找不到通知內容分段工作表');
+      const rows = sheet.getLastRow() >= 2 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues() : [];
+      rows.forEach(row => {
+        const id = String(row[0]), index = Number(row[1]), text = String(row[2]);
+        if (!chunksById.has(id)) chunksById.set(id, new Map());
+        const parts = chunksById.get(id);
+        if (parts.has(index) && parts.get(index) !== text) parts.set(index, null);
+        else if (!parts.has(index)) parts.set(index, text);
+      });
+    }
+    const parts = chunksById.get(payload.payload_id);
+    if (!parts || parts.size !== payload.chunk_count) throw new Error('通知內容分段不完整，停止寄送');
+    const texts = [];
+    for (let index = 0; index < payload.chunk_count; index += 1) {
+      if (typeof parts.get(index) !== 'string') throw new Error('通知內容缺段或分段衝突，停止寄送');
+      texts.push(parts.get(index));
+    }
+    const text = texts.join('');
+    if (text.length !== payload.length) throw new Error('通知內容長度不符，停止寄送');
+    return JSON.parse(text);
+  };
 }
 
 function buildQueueEmail_(eventType, payload, spreadsheetUrl) {
@@ -609,10 +647,11 @@ function reconcileSentAlertLogs_() {
   const values = queue.getDataRange().getValues();
   const map = Object.fromEntries(values[0].map((header, index) => [header, index]));
   const desiredRows = [];
+  const readPayload = createNotificationPayloadReader_();
   values.slice(1).forEach(row => {
     if (String(row[map['狀態']] || '') !== 'SENT') return;
     try {
-      const payload = JSON.parse(String(row[map['內容JSON']] || '{}'));
+      const payload = readPayload(row[map['內容JSON']]);
       const recipient = String(payload.sent_to || fallbackRecipient);
       desiredRows.push(...buildAlertLogRowsForEvent_(
         row[map['事件ID']], row[map['事件類型']], payload, recipient, row[map['寄送時間']] || ''
@@ -940,6 +979,7 @@ function ensureSystemSheets_() {
     [APP.SHEETS.CLOSE_TRENDS, APP.CLOSE_TREND_HEADERS],
     [APP.SHEETS.VOLATILITY_TRENDS, APP.VOLATILITY_TREND_HEADERS],
     [APP.SHEETS.QUEUE, APP.QUEUE_HEADERS],
+    [APP.SHEETS.PAYLOADS, APP.PAYLOAD_HEADERS],
     [APP.SHEETS.CLOSE_STATE, APP.CLOSE_STATE_HEADERS],
     [APP.SHEETS.EXPIRATION_CACHE, APP.EXPIRATION_CACHE_HEADERS],
   ];
@@ -958,6 +998,8 @@ function ensureSystemSheets_() {
   const closeState = spreadsheet.getSheetByName(APP.SHEETS.CLOSE_STATE);
   const expirationCache = spreadsheet.getSheetByName(APP.SHEETS.EXPIRATION_CACHE);
   if (queue) queue.hideSheet();
+  const payloads = spreadsheet.getSheetByName(APP.SHEETS.PAYLOADS);
+  if (payloads) payloads.hideSheet();
   if (closeState) closeState.hideSheet();
   if (expirationCache) expirationCache.hideSheet();
 }

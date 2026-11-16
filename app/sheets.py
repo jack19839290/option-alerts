@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 from datetime import date, datetime, timezone
 from typing import Any
@@ -16,6 +17,8 @@ from .constants import (
     EXPIRATION_CACHE_SHEET,
     NOTIFICATION_QUEUE_HEADERS,
     NOTIFICATION_QUEUE_SHEET,
+    NOTIFICATION_PAYLOAD_SHEET,
+    NOTIFICATION_PAYLOAD_HEADERS,
     SCAN_HEADERS,
     SCAN_OUTPUT_HEADERS,
     SCAN_SHEET,
@@ -444,6 +447,7 @@ class SheetsRepository:
         ).execute()
         existing_ids = {str(row[0]) for row in existing_response.get("values", []) if row}
         rows: list[list[Any]] = []
+        payload_chunks: list[list[Any]] = []
         for event in events:
             event_id = str(event.get("事件ID") or "").strip()
             if not event_id or event_id in existing_ids:
@@ -453,15 +457,32 @@ class SheetsRepository:
             for name in ("失敗掃描", "內容JSON"):
                 if isinstance(values.get(name), (dict, list)):
                     values[name] = json.dumps(values[name], ensure_ascii=False, separators=(",", ":"))
+            payload = str(values.get("內容JSON") or "{}")
+            if len(payload.encode("utf-16-le")) // 2 > 40000:
+                payload_id = hashlib.sha256((event_id + "\n" + payload).encode("utf-8")).hexdigest()
+                # ASCII escaping keeps each code point one UTF-16 unit, including emoji.
+                encoded = json.dumps(json.loads(payload), ensure_ascii=True, separators=(",", ":"))
+                chunks = [encoded[start:start + 40000] for start in range(0, len(encoded), 40000)]
+                payload_chunks.extend([[payload_id, index, chunk] for index, chunk in enumerate(chunks)])
+                values["內容JSON"] = json.dumps({"storage": "chunks-v1", "payload_id": payload_id,
+                    "chunk_count": len(chunks), "length": len(encoded)}, separators=(",", ":"))
             rows.append([self._serializable(values.get(header, ""), header) for header in NOTIFICATION_QUEUE_HEADERS])
+        # Persist chunks first. A failure leaves no sendable queue entry. Content-based IDs
+        # make retries safe; readers accept identical orphan duplicates from an uncertain append.
+        if payload_chunks:
+            self._ensure_sheets([NOTIFICATION_PAYLOAD_SHEET], min_columns=len(NOTIFICATION_PAYLOAD_HEADERS))
+            self._ensure_header(NOTIFICATION_PAYLOAD_SHEET, NOTIFICATION_PAYLOAD_HEADERS)
+            self._execute(self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id, range=_sheet_range(NOTIFICATION_PAYLOAD_SHEET, "A:C"),
+                valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": payload_chunks}))
         if rows:
-            self.service.spreadsheets().values().append(
+            self._execute(self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range=_sheet_range(NOTIFICATION_QUEUE_SHEET, f"A:{end_col}"),
-                valueInputOption="USER_ENTERED",
+                valueInputOption="RAW",
                 insertDataOption="INSERT_ROWS",
                 body={"values": rows},
-            ).execute()
+            ))
 
     def _backfill_close_trend_differences(self) -> None:
         response = self.service.spreadsheets().values().get(

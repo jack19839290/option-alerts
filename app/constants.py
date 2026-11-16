@@ -4,6 +4,8 @@ ALERT_LOG_SHEET = "警示紀錄"
 SYSTEM_LOG_SHEET = "系統紀錄"
 CLOSE_TREND_SHEET = "收盤Delta趨勢"
 NOTIFICATION_QUEUE_SHEET = "通知佇列"
+NOTIFICATION_PAYLOAD_SHEET = "通知內容分段"
+NOTIFICATION_PAYLOAD_HEADERS = ["內容ID", "分段序號", "內容"]
 CLOSE_ALERT_STATE_SHEET = "收盤門檻紀錄"
 EXPIRATION_CACHE_SHEET = "到期日快取"
 
@@ -79,7 +81,7 @@ SETTINGS_DEFAULTS = {
     "通知信箱": "", "自動更新規則": "開盤、盤中整點、收盤", "盤外自動更新": "停用",
     "資料過期門檻(分鐘)": 10, "無風險利率代號": "^IRX", "備援無風險利率": 0.05,
     "預設股息殖利率": 0, "顯示時區": "Asia/Taipei", "市場時區": "America/New_York",
-    "Cloud Run URL": "", "Web App URL": "", "系統版本": "0.9.0",
+    "Cloud Run URL": "", "Web App URL": "", "系統版本": "0.9.1",
     "下次允許抓取(UTC)": "", "連續失敗次數": 0, "最後成功抓取(UTC)": "",
     "最後執行(UTC)": "", "最後狀態": "尚未執行", "GitHub 自動更新": "尚未設定",
     "GitHub 金鑰到期日": "", "GitHub 最後要求(UTC)": "", "GitHub 最後要求狀態": "尚未執行",

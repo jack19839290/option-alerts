@@ -18,6 +18,7 @@ const systemLog = workbook.worksheets.add("系統紀錄");
 const closeTrend = workbook.worksheets.add("收盤Delta趨勢");
 const volatilityTrend = workbook.worksheets.add("波動率趨勢");
 const queue = workbook.worksheets.add("通知佇列");
+const payloads = workbook.worksheets.add("通知內容分段");
 const closeState = workbook.worksheets.add("收盤門檻紀錄");
 const expirationCache = workbook.worksheets.add("到期日快取");
 const sampleChain = workbook.worksheets.add("MU_2027-01-15");
@@ -317,7 +318,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.9.0", "目前規格版本"],
+  ["系統版本", "0.9.1", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],
@@ -379,6 +380,7 @@ systemLog.freezePanes.freezeRows(1);
 
 queue.getRange("A1:O1").values = [["事件ID", "事件類型", "狀態", "建立時間(UTC)", "寄送時間", "重試次數", "下次重試時間", "掃描ID", "股票代號", "到期日", "美東交易日", "是否完整", "失敗掃描", "內容JSON", "最後錯誤"]];
 queue.getRange("A1:O1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
+payloads.getRange("A1:C1").values = [["內容ID", "分段序號", "內容"]];
 closeState.getRange("A1:J1").values = [["記錄ID", "美東交易日", "掃描ID", "第一條件指紋", "狀態", "符合合約JSON", "最後嘗試時間(UTC)", "成功時間(UTC)", "錯誤訊息", "嘗試次數"]];
 closeState.getRange("A1:J1").format = { fill: "#E5E7EB", font: { bold: true }, wrapText: true };
 
