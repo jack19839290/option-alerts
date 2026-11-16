@@ -98,9 +98,23 @@ class RefreshService:
         if not force and next_allowed and now < next_allowed:
             return self._skip("退避等待中", now, next_allowed)
 
+        provider = self.provider or YahooFinanceProvider(default_dividend_yield=_as_float(settings.get("預設股息殖利率"), 0.0))
+        rolling_errors = {}
+        if hasattr(self.repository, 'sync_rolling_scans'):
+            try:
+                rolling = self.repository.sync_rolling_scans(provider, now, market_timezone)
+                rolling_errors = rolling['errors']
+            except RateLimitError as exc:
+                return self._rate_limited(settings, now, str(exc))
+            except (ValueError, RuntimeError) as exc:
+                self.repository.update_settings({'最後狀態': '自動追蹤整理失敗', '最後執行(UTC)': now.isoformat()})
+                self.repository.append_system_log('ERROR', '自動追蹤整理失敗', str(exc))
+                return {'status': 'error', 'reason': str(exc)}
         headers, scans, invalid_rows = self.repository.load_scans()
         active = [scan for scan in scans if scan.enabled]
         if not active:
+            if rolling_errors:
+                return {'status': 'error', 'reason': '自動標的到期日查詢失敗', 'errors': rolling_errors}
             if invalid_rows:
                 details = json.dumps(invalid_rows, ensure_ascii=False)
                 self.repository.update_settings({"最後執行(UTC)": now.isoformat(), "最後狀態": "掃描設定錯誤"})
@@ -128,7 +142,6 @@ class RefreshService:
             if not scan.enabled:
                 updates[scan.scan_id] = {"狀態": DISABLED, "資料狀態": DISABLED, "工作表": scan.sheet_name}
 
-        provider = self.provider or YahooFinanceProvider(default_dividend_yield=_as_float(settings.get("預設股息殖利率"), 0.0))
         symbol = str(settings.get("無風險利率代號") or "^IRX")
         fallback = _as_float(settings.get("備援無風險利率"), 0.05)
         try:
@@ -174,6 +187,11 @@ class RefreshService:
         close_groups: list[dict[str, Any]] = []
 
         for (ticker, expiry), group in groups.items():
+            if ticker in rolling_errors:
+                for scan in group:
+                    updates[scan.scan_id] = self._error_update(scan, now, '到期日查詢失敗', rolling_errors[ticker])
+                error_count += len(group)
+                continue
             try:
                 snapshot = provider.fetch_chain(ticker, expiry)
             except RateLimitError as exc:
@@ -383,7 +401,7 @@ class RefreshService:
         if rate_limit_error:
             return self._rate_limited(settings, now, rate_limit_error, already_written=True)
 
-        complete = success_count == len(active) and not invalid_rows
+        complete = success_count == len(active) and not invalid_rows and not rolling_errors
         status = "成功" if complete else "部分成功"
         settings_update = {"連續失敗次數": 0 if complete else _as_int(settings.get("連續失敗次數")),
                            "下次允許抓取(UTC)": "" if complete else settings.get("下次允許抓取(UTC)", ""),

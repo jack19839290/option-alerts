@@ -1,5 +1,5 @@
 const APP = Object.freeze({
-  VERSION: '0.9.1',
+  VERSION: '0.10.0',
   SHEETS: {
     DASHBOARD: '控制台',
     SCANS: '掃描設定',
@@ -12,6 +12,8 @@ const APP = Object.freeze({
     PAYLOADS: '通知內容分段',
     CLOSE_STATE: '收盤門檻紀錄',
     EXPIRATION_CACHE: '到期日快取',
+    AUTO_TARGETS: '自動追蹤標的',
+    SCAN_ARCHIVE: '掃描設定封存',
   },
   GITHUB: {
     OWNER: 'jack19839290',
@@ -87,6 +89,15 @@ const APP = Object.freeze({
     '最後嘗試時間(UTC)', '成功時間(UTC)', '錯誤訊息', '嘗試次數'],
   EXPIRATION_CACHE_HEADERS: ['股票代號', '狀態', '查詢ID', '查詢時間(UTC)', '到期日JSON',
     '到期日數量', '錯誤訊息'],
+  AUTO_TARGET_HEADERS: [
+    '啟用', '股票代號', '最小DTE', '最大DTE', '顯示類型',
+    '第一門檻啟用', '第一Delta條件', '第一Delta門檻', '第一Bid-Ask價差條件',
+    '第一Bid-Ask價差門檻', '第一年化報酬率條件', '第一年化報酬率門檻', '第一未平倉大於(口)',
+    '第二門檻啟用', '第二Delta條件', '第二Delta門檻', '第二Bid-Ask價差條件',
+    '第二Bid-Ask價差門檻', '第二年化報酬率條件', '第二年化報酬率門檻', '第二未平倉大於(口)',
+    'CALL持股成本', 'Email通知', '備註',
+    '最近查詢日期', '到期日JSON', '管理分頁JSON', '最後同步時間(UTC)', '同步狀態'
+  ],
 });
 
 function onOpen() {
@@ -102,16 +113,14 @@ function onOpen() {
 }
 
 function doGet() {
-  ensureSystemSheets_();
-  return HtmlService.createTemplateFromFile('Index')
+  return HtmlService.createTemplateFromFile('AutoIndex')
     .evaluate()
-    .setTitle('期權鍊掃描設定')
+    .setTitle('自動追蹤標的設定')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
 }
 
 function showScanDialog() {
-  ensureSystemSheets_();
-  const output = HtmlService.createTemplateFromFile('Index')
+  const output = HtmlService.createTemplateFromFile('AutoIndex')
     .evaluate()
     .setWidth(650)
     .setHeight(860);
@@ -209,6 +218,59 @@ function submitScan(payload) {
   };
 }
 
+function getAutoTarget(tickerValue) {
+  const ticker = validateTicker_(tickerValue);
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.AUTO_TARGETS);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, APP.AUTO_TARGET_HEADERS.length).getValues();
+  const row = rows.find(value => String(value[1] || '').trim().toUpperCase() === ticker);
+  if (!row) return null;
+  return Object.fromEntries(APP.AUTO_TARGET_HEADERS.slice(0, 24).map((h, i) => [h, row[i]]));
+}
+
+function submitAutoTarget(payload) {
+  const source = {...payload, expiry: '2099-01-01', displayType: 'PUT', callCostBasis: '',
+    secondAnnualReturnOperator: '≥', secondAnnualReturnThreshold: '10',
+    firstOpenInterestMin: '500', secondOpenInterestMin: '500'};
+  const input = validateScanInput_(source);
+  // Script lock also exists when the form runs as a standalone web-app request.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const spreadsheet = getSpreadsheet_();
+    let sheet = spreadsheet.getSheetByName(APP.SHEETS.AUTO_TARGETS);
+    if (!sheet) sheet = spreadsheet.insertSheet(APP.SHEETS.AUTO_TARGETS);
+    if (sheet.getMaxColumns() < APP.AUTO_TARGET_HEADERS.length) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), APP.AUTO_TARGET_HEADERS.length - sheet.getMaxColumns());
+    }
+    sheet.getRange(1, 1, 1, APP.AUTO_TARGET_HEADERS.length).setValues([APP.AUTO_TARGET_HEADERS]);
+    const values = sheet.getDataRange().getValues();
+    const index = values.findIndex((row, i) => i > 0 && String(row[1] || '').trim().toUpperCase() === input.ticker);
+    const rowNumber = index > 0 ? index + 1 : Math.max(sheet.getLastRow() + 1, 2);
+    const scanRow = buildScanRow_(input);
+    const row = [payload.targetEnabled !== false, input.ticker, 180, 360, ...scanRow.slice(4, 24)];
+    // Preserve ownership and query cache when editing conditions; never reset it.
+    if (rowNumber > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
+    sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+    formatAutoTargets_();
+    prepareNextRefresh_();
+    return {ok: true, message: `${input.ticker} 自動追蹤已儲存：PUT、180～360天。下次更新會同步期權鍊；移出範圍的自動管理分頁會刪除，歷史紀錄保留。`};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function formatAutoTargets_() {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.AUTO_TARGETS);
+  if (!sheet) return;
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(2);
+  sheet.getRange(1, 1, 1, APP.AUTO_TARGET_HEADERS.length).setBackground('#DBEAFE').setFontWeight('bold').setWrap(true);
+  ['J:J', 'L:L', 'R:R', 'T:T'].forEach(range => sheet.getRange(range).setNumberFormat('0.00%'));
+  sheet.getRange('AB:AB').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  sheet.hideColumns(25, 3);
+}
+
 function submitScans(payload) {
   const source = payload || {};
   const expiries = [...new Set((Array.isArray(source.expiries) ? source.expiries : [])
@@ -238,6 +300,9 @@ function submitScans(payload) {
 }
 
 function saveScanInputs_(inputs, updateExisting) {
+  if (getSpreadsheet_().getSheetByName(APP.SHEETS.AUTO_TARGETS)?.getLastRow() > 1) {
+    throw new Error('目前已使用自動追蹤模式，請改由新版網頁或「自動追蹤標的」修改共用條件');
+  }
   const lock = LockService.getDocumentLock();
   lock.waitLock(30000);
   try {
@@ -342,6 +407,7 @@ function setupSystem() {
   applyAllChainFormatting_();
   applyCloseTrendFormatting_();
   applyVolatilityTrendFormatting_();
+  formatAutoTargets_();
   refreshGitHubStatusSettings_();
   spreadsheet.toast(`系統已初始化／升級至 ${APP.VERSION}；工作表時間使用 ${displayTimezone}`, '選擇權警示', 7);
 }
@@ -982,6 +1048,7 @@ function ensureSystemSheets_() {
     [APP.SHEETS.PAYLOADS, APP.PAYLOAD_HEADERS],
     [APP.SHEETS.CLOSE_STATE, APP.CLOSE_STATE_HEADERS],
     [APP.SHEETS.EXPIRATION_CACHE, APP.EXPIRATION_CACHE_HEADERS],
+    [APP.SHEETS.AUTO_TARGETS, APP.AUTO_TARGET_HEADERS],
   ];
   definitions.forEach(([name, headers]) => {
     let sheet = spreadsheet.getSheetByName(name);
@@ -1234,7 +1301,7 @@ function seedDashboard_() {
   sheet.getRange('A13:A18').setValues([
     ['1. 從選單「選擇權警示」執行「初始化／升級系統」。'],
     ['2. 在「設定」確認固定通知信箱，再從選單設定 90 天 GitHub 金鑰。'],
-    ['3. 表單輸入股票後可勾選未來一年內多個到期日，並套用同一組掃描條件。'],
+    ['3. 表單儲存股票與條件後，自動維持180～360天的PUT到期日，移出範圍的行情分頁會刪除。'],
     ['4. 開盤、盤中整點與收盤自動更新；正式收盤會同步保存 Delta 0.10／0.15／0.20 趨勢。'],
     ['5. 第一門檻每天收盤彙總全部符合項目；第二門檻首次符合時即時通知。'],
     ['6. 年化報酬率只用有效 Bid；本工具只供研究監控，不會執行交易。'],

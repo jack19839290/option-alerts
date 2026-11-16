@@ -22,6 +22,8 @@ const payloads = workbook.worksheets.add("通知內容分段");
 const closeState = workbook.worksheets.add("收盤門檻紀錄");
 const expirationCache = workbook.worksheets.add("到期日快取");
 const sampleChain = workbook.worksheets.add("MU_2027-01-15");
+const autoTargets = workbook.worksheets.add("自動追蹤標的");
+const scanArchive = workbook.worksheets.add("掃描設定封存");
 
 const scanHeaders = [
   "啟用", "掃描ID", "股票代號", "到期日", "顯示類型",
@@ -40,6 +42,14 @@ const alertHeaders = [
   "Ask", "Bid-Ask價差率", "事件ID", "事件類型", "門檻", "今日新增", "事件完整性",
   "失敗掃描", "紀錄ID",
 ];
+
+const autoTargetHeaders = ["啟用", "股票代號", "最小DTE", "最大DTE", ...scanHeaders.slice(4, 24),
+  "最近查詢日期", "到期日JSON", "管理分頁JSON", "最後同步時間(UTC)", "同步狀態"];
+autoTargets.getRange('A1:AC1').values = [autoTargetHeaders];
+autoTargets.getRange('A1:AC1').format = {fill: '#DBEAFE', font: {bold: true}, wrapText: true};
+autoTargets.freezePanes.freezeRows(1);
+autoTargets.freezePanes.freezeColumns(2);
+scanArchive.getRange('A1:AN1').values = [[...scanHeaders, '封存時間(UTC)', '封存原因']];
 
 const closeTrendHeaders = [
   "快照ID", "美東交易日", "官方收盤時間(UTC)", "實際抓取時間(UTC)", "掃描ID", "股票代號",
@@ -318,7 +328,7 @@ const settingsRows = [
   ["市場時區", "America/New_York", "到期與市場時段判斷"],
   ["Cloud Run URL", "", "選用部署後填入"],
   ["Web App URL", "", "Apps Script 部署後填入"],
-  ["系統版本", "0.9.1", "目前規格版本"],
+  ["系統版本", "0.10.0", "目前規格版本"],
   ["下次允許抓取(UTC)", "", "系統管理：流量限制退避"],
   ["連續失敗次數", 0, "系統管理"],
   ["最後成功抓取(UTC)", "", "系統管理"],

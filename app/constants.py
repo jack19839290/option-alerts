@@ -25,6 +25,13 @@ SCAN_HEADERS = [
 SCAN_INPUT_HEADERS = SCAN_HEADERS[:24]
 SCAN_OUTPUT_HEADERS = SCAN_HEADERS[24:]
 
+AUTO_TARGET_SHEET = "自動追蹤標的"
+AUTO_TARGET_HEADERS = ["啟用", "股票代號", "最小DTE", "最大DTE"] + SCAN_HEADERS[4:24] + [
+    "最近查詢日期", "到期日JSON", "管理分頁JSON", "最後同步時間(UTC)", "同步狀態",
+]
+SCAN_ARCHIVE_SHEET = "掃描設定封存"
+SCAN_ARCHIVE_HEADERS = SCAN_HEADERS + ["封存時間(UTC)", "封存原因"]
+
 CHAIN_HEADERS = [
     "符合門檻", "第一門檻結果", "第二門檻結果", "類型", "履約價", "標的股價",
     "Bid", "年化報酬率", "第一年化報酬率結果", "第二年化報酬率結果",
@@ -81,7 +88,7 @@ SETTINGS_DEFAULTS = {
     "通知信箱": "", "自動更新規則": "開盤、盤中整點、收盤", "盤外自動更新": "停用",
     "資料過期門檻(分鐘)": 10, "無風險利率代號": "^IRX", "備援無風險利率": 0.05,
     "預設股息殖利率": 0, "顯示時區": "Asia/Taipei", "市場時區": "America/New_York",
-    "Cloud Run URL": "", "Web App URL": "", "系統版本": "0.9.1",
+    "Cloud Run URL": "", "Web App URL": "", "系統版本": "0.10.0",
     "下次允許抓取(UTC)": "", "連續失敗次數": 0, "最後成功抓取(UTC)": "",
     "最後執行(UTC)": "", "最後狀態": "尚未執行", "GitHub 自動更新": "尚未設定",
     "GitHub 金鑰到期日": "", "GitHub 最後要求(UTC)": "", "GitHub 最後要求狀態": "尚未執行",

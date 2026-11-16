@@ -77,6 +77,12 @@ class YahooFinanceProvider:
         self.default_dividend_yield = default_dividend_yield
         self.risk_free_rate_source = "尚未取得"
         self.risk_free_rate_note = ""
+        self._tickers: dict[str, Any] = {}
+
+    def _option_ticker(self, symbol: str):
+        if symbol not in self._tickers:
+            self._tickers[symbol] = self._yf().Ticker(symbol)
+        return self._tickers[symbol]
 
     @staticmethod
     def _yf():
@@ -125,7 +131,7 @@ class YahooFinanceProvider:
 
     def fetch_chain(self, ticker_symbol: str, expiry: date) -> ChainSnapshot:
         try:
-            ticker = self._yf().Ticker(ticker_symbol)
+            ticker = self._option_ticker(ticker_symbol)
             chain = ticker.option_chain(expiry.isoformat())
             underlying = chain.underlying or {}
             spot = self._underlying_price(ticker, underlying)
@@ -150,7 +156,7 @@ class YahooFinanceProvider:
     def fetch_expirations(self, ticker_symbol: str) -> list[date]:
         """Return the option expiration dates currently advertised by Yahoo."""
         try:
-            ticker = self._yf().Ticker(ticker_symbol)
+            ticker = self._option_ticker(ticker_symbol)
             raw_dates = ticker.options
             expirations = sorted(
                 {

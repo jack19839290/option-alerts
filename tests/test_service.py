@@ -159,6 +159,24 @@ class NoMatchProvider(FakeProvider):
 
 
 class ServiceTests(unittest.TestCase):
+    def test_rolling_failure_blocks_alerts_for_that_ticker(self):
+        class Repo(FakeRepository):
+            def sync_rolling_scans(self, *args):
+                return {'errors': {'MU': 'Yahoo failed'}}
+        repository = Repo([make_scan(second=True)])
+        result = RefreshService(repository, FakeProvider()).refresh(
+            force=True, now=datetime(2026, 8, 27, 15, tzinfo=timezone.utc))
+        self.assertEqual(result['status'], '部分成功')
+        self.assertEqual(repository.notification_events, [])
+
+    def test_rolling_synchronization_is_skipped_outside_market(self):
+        class Repo(FakeRepository):
+            def sync_rolling_scans(self, *args):
+                raise AssertionError('must not run')
+        result = RefreshService(Repo([make_scan()]), FakeProvider()).refresh(
+            now=datetime(2026, 8, 27, 22, tzinfo=timezone.utc))
+        self.assertEqual(result['status'], 'skipped')
+
     def test_automatic_refresh_skips_outside_option_session(self):
         scan = make_scan()
         repository = FakeRepository([scan])

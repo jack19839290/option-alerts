@@ -17,7 +17,7 @@
 3. 重新整理 Google Sheet，從「選擇權警示」選單執行「初始化／升級系統」。
 4. 第一次執行時完成 Google 授權；系統會建立 Email、開盤時段更新檢查與控制台手動更新三個觸發器。
 
-請確認 Apps Script 的 `APP.VERSION` 為 `0.9.1`。升級步驟請見 [UPGRADE_0.9.1.md](UPGRADE_0.9.1.md)。
+請確認 Apps Script 的 `APP.VERSION` 為 `0.10.0`。升級步驟請見 [UPGRADE_0.10.md](UPGRADE_0.10.md)。
 
 ## 1. 建立不綁計費的 Google Cloud Project
 
@@ -82,4 +82,4 @@ Google Sheets API 的標準用量不需要額外付費，也不需要啟用 Clou
 
 ## 升級
 
-既有使用者不需重建 `GOOGLE_CREDENTIALS`、`SPREADSHEET_ID`、GitHub 金鑰或服務帳戶。請依 [UPGRADE_0.8.md](UPGRADE_0.8.md) 更新 Apps Script。
+既有使用者不需重建 `GOOGLE_CREDENTIALS`、`SPREADSHEET_ID`、GitHub 金鑰或服務帳戶。請依 [UPGRADE_0.10.md](UPGRADE_0.10.md) 更新 Apps Script，並新增新版輸入網頁 `AutoIndex`。

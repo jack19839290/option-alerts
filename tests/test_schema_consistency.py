@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.constants import ALERT_LOG_HEADERS, CHAIN_HEADERS, CLOSE_ALERT_STATE_HEADERS, CLOSE_TREND_HEADERS, EXPIRATION_CACHE_HEADERS, SCAN_HEADERS
 from app.constants import VOLATILITY_TREND_HEADERS
+from app.constants import AUTO_TARGET_HEADERS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,11 @@ def quoted_values(block: str) -> list[str]:
 
 
 class SchemaConsistencyTests(unittest.TestCase):
+    def test_auto_target_headers_match(self):
+        code = (ROOT / 'apps-script' / 'Code.gs').read_text(encoding='utf-8')
+        block = re.search(r'AUTO_TARGET_HEADERS:\s*\[(.*?)\]\s*,', code, re.S)
+        self.assertEqual(quoted_values(block.group(1)), AUTO_TARGET_HEADERS)
+
     def test_volatility_headers_match(self):
         code = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
         builder = (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8")

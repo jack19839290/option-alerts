@@ -37,7 +37,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 12
     env:
       SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       MAX_MONITOR_ROWS: '1000'

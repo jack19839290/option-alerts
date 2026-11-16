@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-Hant"><head>
+<base target="_top"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{font-family:Arial,"Noto Sans TC",sans-serif;color:#172033}body{margin:0;background:#f5f7fb}
+main{max-width:800px;margin:auto;padding:20px}h1{font-size:24px;margin:0 0 10px}p{line-height:1.6}
+form{display:grid;grid-template-columns:1fr 1fr;gap:16px;background:white;padding:20px;border:1px solid #dce3ef;border-radius:12px}
+label{display:grid;gap:7px;font-size:14px}.full,fieldset,.notice,button,#status{grid-column:1/-1}
+fieldset{display:grid;grid-template-columns:1fr 1fr;gap:15px;border:1px solid #ccd7e6;border-radius:8px;padding:16px}
+legend{font-weight:700;color:#1e40af}.condition{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+input,select,textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #bac7da;border-radius:6px;font:inherit;background:white}
+.check{display:flex;align-items:center;gap:8px}.check input{width:auto}.hint{font-size:12px;color:#52627a;line-height:1.6}
+.notice{padding:12px;background:#eef4ff;border-radius:8px;line-height:1.6;font-size:13px}
+button{padding:13px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-weight:700;cursor:pointer}button:disabled{background:#94a3b8;cursor:wait}
+#status{display:none;padding:12px;white-space:pre-line;border-radius:7px;line-height:1.6}.ok{background:#dcfce7;color:#166534}.error{background:#fee2e2;color:#991b1b}
+.fixed{background:#f3f6fa}input:focus,select:focus,textarea:focus{outline:2px solid #93c5fd}
+@media(max-width:600px){form,fieldset{grid-template-columns:1fr}main{padding:12px}form{padding:15px}}
+</style></head><body><main>
+<h1>自動追蹤標的設定</h1>
+<p>自動追蹤距離到期 180～360 天（含邊界）的所有 PUT 到期日。每天加入新到期日，並移除超出範圍的期權鍊分頁。</p>
+<form id="scanForm">
+<label class="full">股票代號<input id="tickerInput" name="ticker" required maxlength="15" placeholder="例如 MU" autocomplete="off"><span id="targetHint" class="hint">輸入已追蹤標的會帶出目前設定。新標的直接儲存即可，不需要選到期日。</span></label>
+<label>追蹤類型<input class="fixed" value="PUT" readonly></label>
+<label>距離到期天數<input class="fixed" value="180～360 天（美東日曆天）" readonly></label>
+<fieldset><legend>第一門檻：每日收盤通知</legend>
+<label class="check full"><input name="firstEnabled" type="checkbox" checked>啟用第一門檻</label>
+<label>Delta條件<span class="condition"><select name="firstDeltaOperator"><option value="">不設定</option><option value="≤" selected>小於等於</option><option value="≥">大於等於</option></select><input name="firstDeltaThreshold" type="number" min="0" max="1" step="0.0001" value="0.15"></span><span class="hint">使用 |Delta| 絕對值判斷。</span></label>
+<label>Bid–Ask Spread條件<span class="condition"><select name="firstSpreadOperator"><option value="">不設定</option><option value="≤">小於等於</option><option value="≥">大於等於</option></select><input name="firstSpreadThreshold" type="number" min="0" step="0.01" placeholder="15 代表 15%"></span></label>
+<label>年化報酬率條件<span class="condition"><select name="firstAnnualReturnOperator"><option value="">不設定</option><option value="≥" selected>大於等於</option><option value="≤">小於等於</option></select><input name="firstAnnualReturnThreshold" type="number" min="0" step="0.01" value="10"></span><span class="hint">10 代表 10%。</span></label>
+<label>未平倉量<input class="fixed" value="嚴格大於 500 口" readonly></label>
+</fieldset>
+<fieldset><legend>第二門檻：即時通知</legend>
+<label class="check full"><input name="secondEnabled" type="checkbox" checked>啟用第二門檻</label>
+<label>Delta條件<span class="condition"><select name="secondDeltaOperator"><option value="">不設定</option><option value="≤" selected>小於等於</option><option value="≥">大於等於</option></select><input name="secondDeltaThreshold" type="number" min="0" max="1" step="0.0001" value="0.10"></span><span class="hint">使用 |Delta| 絕對值判斷。</span></label>
+<label>Bid–Ask Spread條件<span class="condition"><select name="secondSpreadOperator"><option value="">不設定</option><option value="≤" selected>小於等於</option><option value="≥">大於等於</option></select><input name="secondSpreadThreshold" type="number" min="0" step="0.01" value="15"></span><span class="hint">15 代表 15%。</span></label>
+<label>年化報酬率<input class="fixed" value="大於等於 10%" readonly></label>
+<label>未平倉量<input class="fixed" value="嚴格大於 500 口" readonly></label>
+</fieldset>
+<label class="check"><input name="emailEnabled" type="checkbox" checked>啟用 Email 通知</label>
+<label class="check"><input name="targetEnabled" type="checkbox" checked>啟用這個標的</label>
+<label class="full">備註<textarea name="note" maxlength="500" placeholder="選填"></textarea></label>
+<div class="notice">條件會套用至這個標的的所有自動到期日。移出範圍後會刪除行情分頁；警示、收盤 Delta 與波動率歷史保留。停用標的會暫停警示並保留分頁。第一門檻每日收盤彙總，第二門檻首次符合時通知。</div>
+<button id="submitButton" type="submit" disabled>儲存自動追蹤標的</button><div id="status" role="status" aria-live="polite"></div>
+</form></main><script>
+const form=document.getElementById('scanForm'),tickerInput=document.getElementById('tickerInput');
+const button=document.getElementById('submitButton'),statusBox=document.getElementById('status'),hint=document.getElementById('targetHint');
+let debounceTimer=null,generation=0,busy=false,loading=false,loadedTicker='';
+function ticker(){return tickerInput.value.trim().toUpperCase()}
+function valid(){return /^[A-Z0-9.^-]{1,15}$/.test(ticker())}
+function sync(){button.disabled=busy||loading||!valid()}
+function status(text,type){statusBox.textContent=text;statusBox.className=type;statusBox.style.display=text?'block':'none'}
+function loadTarget(){
+const value=ticker();tickerInput.value=value;const request=++generation;
+if(!valid()){loading=false;hint.textContent='請輸入有效股票代號。';sync();return}
+loading=true;sync();hint.textContent='正在讀取標的設定…';
+google.script.run.withSuccessHandler(target=>{
+if(request!==generation||value!==ticker())return;
+form.reset();tickerInput.value=value;
+if(target){
+const pairs={firstDeltaOperator:'第一Delta條件',firstDeltaThreshold:'第一Delta門檻',firstSpreadOperator:'第一Bid-Ask價差條件',firstSpreadThreshold:'第一Bid-Ask價差門檻',firstAnnualReturnOperator:'第一年化報酬率條件',firstAnnualReturnThreshold:'第一年化報酬率門檻',secondDeltaOperator:'第二Delta條件',secondDeltaThreshold:'第二Delta門檻',secondSpreadOperator:'第二Bid-Ask價差條件',secondSpreadThreshold:'第二Bid-Ask價差門檻',note:'備註'};
+Object.entries(pairs).forEach(([name,key])=>{let v=target[key]??'';if(name.includes('SpreadThreshold')||name.includes('AnnualReturnThreshold'))v=v===''?'':Number(v)*100;form.elements[name].value=v});
+const truth=v=>v===true||String(v).toUpperCase()==='TRUE';
+form.elements.firstEnabled.checked=truth(target['第一門檻啟用']);form.elements.secondEnabled.checked=truth(target['第二門檻啟用']);form.elements.emailEnabled.checked=truth(target['Email通知']);form.elements.targetEnabled.checked=truth(target['啟用']);
+hint.textContent='已帶出目前設定；儲存後更新這個標的所有自動到期日。';
+}else hint.textContent='新標的，將採用下列條件。儲存後於下次更新建立期權鍊。';
+loadedTicker=value;loading=false;sync();
+}).withFailureHandler(error=>{if(request!==generation)return;loading=false;hint.textContent='讀取失敗，請重新輸入股票代號重試。';status(error.message||String(error),'error');button.disabled=true}).getAutoTarget(value);
+}
+tickerInput.addEventListener('input',()=>{generation++;loadedTicker='';loading=true;clearTimeout(debounceTimer);sync();status('','');debounceTimer=setTimeout(loadTarget,600)});
+tickerInput.addEventListener('blur',()=>{clearTimeout(debounceTimer);if(loadedTicker!==ticker())loadTarget()});
+form.addEventListener('submit',event=>{
+event.preventDefault();if(busy||loading||!valid())return;busy=true;sync();button.textContent='正在儲存…';status('','');
+const data=Object.fromEntries(new FormData(form).entries());data.ticker=ticker();['firstEnabled','secondEnabled','emailEnabled','targetEnabled'].forEach(name=>data[name]=form.elements[name].checked);
+google.script.run.withSuccessHandler(result=>{busy=false;button.textContent='儲存自動追蹤標的';sync();status(result.message,'ok')}).withFailureHandler(error=>{busy=false;button.textContent='儲存自動追蹤標的';sync();status(error.message||String(error),'error')}).submitAutoTarget(data);
+});
+</script></body></html>

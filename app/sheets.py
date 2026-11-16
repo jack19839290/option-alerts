@@ -29,6 +29,7 @@ from .constants import (
     VOLATILITY_TREND_HEADERS,
 )
 from .models import ScanRecord
+from .rolling_repository import RollingRepositoryMixin
 
 
 SHEETS_DATETIME_EPOCH = datetime(1899, 12, 30)
@@ -78,7 +79,7 @@ def _is_blank_scan_row(headers: list[str], row: list[Any]) -> bool:
     )
 
 
-class SheetsRepository:
+class SheetsRepository(RollingRepositoryMixin):
     def __init__(self, spreadsheet_id: str, max_monitor_rows: int = 1000):
         from google.auth import default
         from googleapiclient.discovery import build

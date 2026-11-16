@@ -8,6 +8,8 @@ if (!browserScript) throw new Error("Index.html is missing its browser script");
 
 new vm.Script(code);
 new vm.Script(browserScript);
+const autoHtml = fs.readFileSync(new URL('../apps-script/AutoIndex.html', import.meta.url), 'utf8');
+new vm.Script(autoHtml.match(/<script>([\s\S]*?)<\/script>/)[1]);
 
 const context = {
   console,

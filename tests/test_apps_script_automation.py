@@ -9,13 +9,13 @@ CODE = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
 
 class AppsScriptAutomationTests(unittest.TestCase):
-    def test_version_is_0_9_1_everywhere(self):
-        self.assertIn("VERSION: '0.9.1'", CODE)
-        self.assertIn('version = "0.9.1"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('__version__ = "0.9.1"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
-        self.assertIn('["系統版本", "0.9.1", "目前規格版本"]',
+    def test_version_is_0_10_0_everywhere(self):
+        self.assertIn("VERSION: '0.10.0'", CODE)
+        self.assertIn('version = "0.10.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('__version__ = "0.10.0"', (ROOT / "app" / "__init__.py").read_text(encoding="utf-8"))
+        self.assertIn('["系統版本", "0.10.0", "目前規格版本"]',
                       (ROOT / "scripts" / "build_workbook.mjs").read_text(encoding="utf-8"))
-        self.assertIn('目前版本：`0.9.1`', (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('目前版本：`0.10.0`', (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_setup_enforces_display_timezone_and_migrates_visible_times(self):
         self.assertIn("spreadsheet.setSpreadsheetTimeZone(displayTimezone);", CODE)
