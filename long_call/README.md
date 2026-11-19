@@ -10,3 +10,9 @@ Google Sheet 的「設定與標的」第 5 列是預設值。從第 10 列起輸
 2. 在 GitHub Actions 設定 `LONG_CALL_SPREADSHEET_ID`。現有 `GOOGLE_CREDENTIALS` 供服務帳戶驗證。原有 `SPREADSHEET_ID` 用於驗證兩份表的 ID 各自獨立。
 3. 將 `Code.gs` 放入新表的「擴充功能 → Apps Script」。執行 `installLongCallEmail` 並授權，寄件與收件都是授權帳號。表內「掃描紀錄」會顯示寄送狀態。
 4. GitHub Actions 於美東 13:23 和 16:23 檢查當天股票選擇權收盤時間。休市略過，提早收盤與平常收盤各只產生一筆當日收盤結果。手動執行可在盤外更新。
+
+## 網頁表單
+
+另建 Apps Script 專案，加入 `Web.gs` 與 `Web.html`，並以 `webapp-manifest.json` 作為 `appsscript.json`。在該專案的 `Config.gs` 定義 `const LONG_CALL_WEB_SHEET_ID = '新買權試算表的 ID';`。以部署者身分、僅限自己存取的設定部署為網頁應用程式。原試算表的收盤 Email 使用原有綁定專案。
+
+網頁可設定個別標的或全表預設，個別門檻留白會沿用預設。表單儲存到「設定與標的」，在下次掃描生效。手動更新可從頁底連結進入 GitHub Actions。

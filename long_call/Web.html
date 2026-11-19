@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{font-family:Arial,"Noto Sans TC",sans-serif;color:#172033}
+    body{margin:0;background:#f5f7fb}
+    main{max-width:800px;margin:auto;padding:20px}
+    h1{font-size:24px;margin:0 0 10px}
+    p{line-height:1.6}
+    form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;background:white;padding:20px;border:1px solid #dce3ef;border-radius:12px}
+    label{display:grid;gap:7px;font-size:14px}
+    .full,fieldset,.notice,#submitButton,#status{grid-column:1/-1}
+    fieldset{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0;gap:15px;border:1px solid #ccd7e6;border-radius:8px;padding:16px;margin:0}
+    legend{font-weight:700;color:#1e40af}
+    input,select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #bac7da;border-radius:6px;font:inherit;background:white}
+    .check{display:flex;align-items:center;gap:8px}
+    .check input{width:auto}
+    .hint{font-size:12px;color:#52627a;line-height:1.6}
+    .notice{padding:12px;background:#eef4ff;border-radius:8px;line-height:1.6;font-size:13px}
+    button{padding:13px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-weight:700;cursor:pointer}
+    button:disabled{background:#94a3b8;cursor:default}
+    #status{padding:12px;white-space:pre-line;border-radius:7px;line-height:1.6}
+    .ok{background:#dcfce7;color:#166534}
+    .error{background:#fee2e2;color:#991b1b}
+    .fixed{background:#f3f6fa}
+    :is(input, select, button, a):focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+    [hidden]{display:none!important}
+    nav{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:14px;font-size:14px}
+    nav a,.secondary{color:#1e40af}
+    .secondary{background:none;padding:0;text-decoration:underline}
+    .secondary:disabled{background:none;color:#64748b}
+    @media(max-width:600px){form,fieldset{grid-template-columns:minmax(0,1fr)}main{padding:12px}form{padding:15px}}
+  </style>
+</head>
+<body><main>
+  <h1>買入買權追蹤設定</h1>
+  <p>輸入美股代號，設定買權篩選門檻。系統會掃描指定天期內的所有掛牌到期日。</p>
+  <form id="scanForm">
+    <label>設定範圍<select name="scope"><option value="ticker">個別標的</option><option value="defaults">全表預設</option></select></label>
+    <label>追蹤類型<input class="fixed" value="CALL" readonly></label>
+    <label id="tickerRow" class="full">股票代號
+      <input name="ticker" list="tracked" placeholder="例如 MSFT" maxlength="12" autocomplete="off" required>
+      <datalist id="tracked"></datalist>
+      <span id="targetHint" class="hint">輸入已追蹤標的會帶出目前設定。</span>
+    </label>
+    <fieldset id="filters" disabled>
+      <legend>篩選門檻</legend>
+      <label>最小 DTE<input name="minDte" type="number" min="1" step="1"></label>
+      <label>最大 DTE<input name="maxDte" type="number" min="1" step="1"></label>
+      <label>最低 Delta<input name="minDelta" type="number" min="0" max="1" step="any"></label>
+      <label>最低釋放現金比例（%）<input name="minCash" type="number" min="0" max="100" step="any"></label>
+      <label>最低未平倉量（口）<input name="minOi" type="number" min="0" step="1"></label>
+      <label>最高 Bid–Ask Spread（%）<input name="maxSpread" type="number" min="0" max="200" step="any"></label>
+      <label>最高年化資金成本（%）<input name="maxCost" type="number" min="0" step="any"></label>
+      <label>試算買入價
+        <select name="priceSource">
+          <option value="">沿用全表預設</option><option>Mid</option><option>Bid</option><option>Ask</option>
+        </select>
+      </label>
+      <label id="enabledRow" class="check full"><input name="enabled" type="checkbox" checked>啟用這個標的</label>
+    </fieldset>
+    <div class="notice">個別門檻留白會沿用全表預設。百分比欄輸入 2 代表 2%。年化資金成本只計時間價值，儲存後在下一次掃描套用。</div>
+    <button id="submitButton" type="submit" disabled>儲存追蹤標的</button>
+    <div id="status" role="status" aria-live="polite" hidden></div>
+  </form>
+  <nav aria-label="相關操作">
+    <a id="settingsLink" target="_blank" rel="noopener" hidden>開啟試算表</a>
+    <a id="resultsLink" target="_blank" rel="noopener" hidden>查看符合條件</a>
+    <a href="https://github.com/jack19839290/option-alerts/actions/workflows/long-call.yml" target="_blank" rel="noopener">手動更新</a>
+    <button id="reloadButton" type="button" class="secondary">重新載入</button>
+  </nav>
+</main>
+<script>
+  const form = document.getElementById('scanForm');
+  const input = form.elements;
+  const fields = ['minDte', 'maxDte', 'minDelta', 'minCash', 'minOi', 'maxSpread', 'maxCost', 'priceSource'];
+  const percents = new Set(['minCash', 'maxSpread', 'maxCost']);
+  const filters = document.getElementById('filters');
+  const submit = document.getElementById('submitButton');
+  const reload = document.getElementById('reloadButton');
+  const hint = document.getElementById('targetHint');
+  const statusBox = document.getElementById('status');
+  let request = 0;
+  let timer;
+  let state = null;
+  let saving = false;
+
+  const isDefaults = () => input.scope.value === 'defaults';
+  const ticker = () => isDefaults() ? '' : input.ticker.value.trim().toUpperCase();
+  const validTicker = () => /^[A-Z][A-Z0-9.-]{0,11}$/.test(ticker());
+  const display = (name, value) => value !== '' && percents.has(name) ?
+    Number((Number(value) * 100).toPrecision(15)) : value;
+
+  function status(text, type = '') {
+    statusBox.textContent = text;
+    statusBox.className = type;
+    statusBox.hidden = !text;
+  }
+
+  function sync() {
+    const defaults = isDefaults();
+    input.ticker.required = !defaults;
+    document.getElementById('tickerRow').hidden = defaults;
+    document.getElementById('enabledRow').hidden = defaults;
+    input.scope.disabled = input.ticker.disabled = reload.disabled = saving;
+    filters.disabled = saving || !state || (!defaults && !validTicker());
+    submit.disabled = filters.disabled;
+    submit.textContent = saving ? '正在儲存…' : defaults ? '儲存全表預設' : '儲存追蹤標的';
+  }
+
+  function apply(data) {
+    fields.forEach((name, i) => {
+      const control = input[name];
+      const fallback = display(name, data.defaults[i]);
+      control.value = display(name, data.values[i]);
+      control.required = isDefaults();
+      if (control.tagName === 'SELECT') {
+        control.options[0].textContent = isDefaults() ? '請選擇' : '沿用全表預設（' + fallback + '）';
+      } else {
+        control.placeholder = isDefaults() ? '' : '預設 ' + fallback + (percents.has(name) ? '%' : '');
+      }
+    });
+    input.enabled.checked = data.enabled;
+    document.getElementById('tracked').replaceChildren(...data.tickers.map(symbol => new Option(symbol)));
+    for (const [id, url] of [['settingsLink', data.sheetUrl], ['resultsLink', data.resultsUrl]]) {
+      const link = document.getElementById(id);
+      link.href = url;
+      link.hidden = false;
+    }
+  }
+
+  function load() {
+    clearTimeout(timer);
+    const current = ++request;
+    const symbol = ticker();
+    state = null;
+    sync();
+    if (symbol && !validTicker()) {
+      hint.textContent = '請輸入有效的股票代號。';
+      return;
+    }
+    if (symbol) input.ticker.value = symbol;
+    hint.textContent = '正在讀取設定…';
+    google.script.run.withSuccessHandler(data => {
+      if (current !== request) return;
+      apply(data);
+      state = data;
+      hint.textContent = data.row ? '已帶出目前的標的設定。' :
+        symbol ? '新標的，留白欄位會沿用全表預設。' : '輸入已追蹤標的會帶出目前設定。';
+      sync();
+    }).withFailureHandler(error => {
+      if (current !== request) return;
+      hint.textContent = '讀取失敗，請重新載入。';
+      status(error.message || String(error), 'error');
+    }).loadLongCallForm(symbol);
+  }
+
+  input.ticker.addEventListener('input', () => {
+    clearTimeout(timer);
+    request += 1;
+    state = null;
+    sync();
+    status('');
+    timer = setTimeout(load, 500);
+  });
+  input.scope.addEventListener('change', () => { status(''); load(); });
+  reload.addEventListener('click', () => { status(''); load(); });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (submit.disabled) return;
+    const symbol = ticker();
+    const values = fields.map(name => {
+      const value = input[name].value;
+      if (value === '' || name === 'priceSource') return value;
+      return Number(value) / (percents.has(name) ? 100 : 1);
+    });
+    const payload = { ticker: symbol, enabled: input.enabled.checked, revision: state.revision, values };
+    saving = true;
+    sync();
+    status('');
+    google.script.run.withSuccessHandler(data => {
+      state = data;
+      apply(data);
+      saving = false;
+      sync();
+      status((symbol || '全表預設') + '已儲存。下一次掃描將套用設定。', 'ok');
+    }).withFailureHandler(error => {
+      saving = false;
+      sync();
+      status(error.message || String(error), 'error');
+    }).saveLongCallForm(payload);
+  });
+  load();
+</script>
+</body></html>
