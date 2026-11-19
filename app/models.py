@@ -168,6 +168,7 @@ class OptionQuote:
     volume: int | None
     open_interest: int | None
     last_trade_time: datetime | None
+    contract_size: str = ""
 
 
 @dataclass(slots=True)

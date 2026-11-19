@@ -1,0 +1,39 @@
+name: Long Call close scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 13,16 * * 1-5'
+      timezone: America/New_York
+
+permissions:
+  contents: read
+
+concurrency:
+  group: long-call-sheets
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LONG_CALL_SPREADSHEET_ID: ${{ secrets.LONG_CALL_SPREADSHEET_ID }}
+      PUT_SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Scan calls
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            python -m long_call.scan --close
+          else
+            python -m long_call.scan
+          fi

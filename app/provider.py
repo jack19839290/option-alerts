@@ -129,7 +129,7 @@ class YahooFinanceProvider:
         self.risk_free_rate_note = f"{symbol} 即時值與最近收盤均無法取得，採用備援利率"
         return fallback
 
-    def fetch_chain(self, ticker_symbol: str, expiry: date) -> ChainSnapshot:
+    def fetch_chain(self, ticker_symbol: str, expiry: date, *, calls_only: bool = False) -> ChainSnapshot:
         try:
             ticker = self._option_ticker(ticker_symbol)
             chain = ticker.option_chain(expiry.isoformat())
@@ -139,7 +139,8 @@ class YahooFinanceProvider:
                 underlying, self.default_dividend_yield
             )
             quotes = self._convert_frame(chain.calls, "CALL")
-            quotes.extend(self._convert_frame(chain.puts, "PUT"))
+            if not calls_only:
+                quotes.extend(self._convert_frame(chain.puts, "PUT"))
             return ChainSnapshot(
                 ticker=ticker_symbol,
                 expiry=expiry,
@@ -209,6 +210,7 @@ class YahooFinanceProvider:
                     volume=_safe_int(row.get("volume")),
                     open_interest=_safe_int(row.get("openInterest")),
                     last_trade_time=last_trade if isinstance(last_trade, datetime) else None,
+                    contract_size=str(row.get("contractSize") or "").upper(),
                 )
             )
         return quotes
