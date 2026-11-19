@@ -25,19 +25,19 @@ function saveLongCallForm(payload) {
   lock.waitLock(10000);
   try {
     const sheet = longCallWebSheet_();
-    const state = longCallFormState_(sheet, ticker);
+    const rows = longCallRows_(sheet);
+    const state = longCallFormState_(sheet, ticker, rows);
     if (payload.revision !== state.revision) {
       throw new Error('設定已更新，請按「重新載入」後再儲存。');
     }
     const proposed = longCallValues_(payload.values, Boolean(ticker));
     if (ticker) {
       longCallEffective_(proposed, state.defaults);
-      const row = state.row || Math.max(10, sheet.getLastRow() + 1);
+      const row = state.row || longCallNewTargetRow_(rows);
       if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
       sheet.getRange(row, 1, 1, 10).setValues([[payload.enabled, ticker, ...proposed]]);
     } else {
       longCallEffective_(proposed, proposed);
-      const rows = longCallRows_(sheet);
       for (const row of rows) {
         if (!longCallEnabled_(row[0]) || !row[1]) continue;
         try {
@@ -71,9 +71,16 @@ function longCallRows_(sheet) {
   return length > 0 ? sheet.getRange(10, 1, length, 10).getValues() : [];
 }
 
-function longCallFormState_(sheet, ticker) {
+function longCallNewTargetRow_(rows) {
+  // A preformatted target row has an unchecked checkbox and no other values.
+  const index = rows.findIndex(([enabled, ...values]) =>
+    (enabled === false || enabled === '') && values.every(value => value === '')
+  );
+  return 10 + (index < 0 ? rows.length : index);
+}
+
+function longCallFormState_(sheet, ticker, rows = longCallRows_(sheet)) {
   const defaults = sheet.getRange('C5:J5').getValues()[0];
-  const rows = longCallRows_(sheet);
   const tickerOf = row => String(row[1]).trim().toUpperCase();
   const matching = ticker ? rows.map((row, i) => tickerOf(row) === ticker ? i : -1).filter(i => i >= 0) : [];
   if (matching.length > 1) throw new Error(`${ticker} 在試算表有重複設定，請先合併。`);
