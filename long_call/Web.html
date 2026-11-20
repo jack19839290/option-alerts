@@ -32,10 +32,28 @@
     nav a,.secondary{color:#1e40af}
     .secondary{background:none;padding:0;text-decoration:underline}
     .secondary:disabled{background:none;color:#64748b}
+    .strategy-tabs{margin:0 0 20px}
+    .strategy-tabs button[aria-pressed="false"],.quiet{background:#e8eef9;color:#1e40af}
+    .panel{background:white;border:1px solid #dce3ef;border-radius:12px;margin-top:20px;padding:16px}
+    .controls{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:12px 0}
+    .scroll{overflow:auto}
+    table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+    td,th{border-bottom:1px solid #e2e8f0;text-align:left;padding:9px;min-width:max-content}
+    th{background:#eef4ff;white-space:nowrap}
+    td{white-space:nowrap}
+    #putCompare th:first-child{position:sticky;left:0;z-index:1}
+    #putCompare td{white-space:normal;min-width:145px}
+    #putStatus{padding:8px;white-space:pre-line}
+    summary{cursor:pointer;font-weight:700}
     @media(max-width:600px){form,fieldset{grid-template-columns:minmax(0,1fr)}main{padding:12px}form{padding:15px}}
   </style>
 </head>
 <body><main>
+  <nav class="strategy-tabs" aria-label="策略">
+    <button type="button" id="callTab" aria-pressed="true" aria-controls="callPanel">買入買權</button>
+    <button type="button" id="putTab" aria-pressed="false" aria-controls="putPanel">買入賣權避險</button>
+  </nav>
+  <section id="callPanel">
   <h1>買入買權追蹤設定</h1>
   <p>輸入美股代號，設定買權篩選門檻。系統會掃描指定天期內的所有掛牌到期日。</p>
   <form id="scanForm">
@@ -72,6 +90,60 @@
     <a href="https://github.com/jack19839290/option-alerts/actions/workflows/long-call.yml" target="_blank" rel="noopener">手動更新</a>
     <button id="reloadButton" type="button" class="secondary">重新載入</button>
   </nav>
+  </section>
+  <section id="putPanel" hidden>
+    <h1>買入賣權避險</h1>
+    <p>以 Ask 試算買入 1 口 Put 保護 100 股。Yahoo 缺少 Put 報價時間，通過數值門檻的合約會顯示在「初篩通過・行情待確認」。</p>
+    <form id="putForm">
+      <label>設定範圍<select name="scope"><option value="ticker">個別標的</option><option value="defaults">全表預設</option></select></label>
+      <label>已儲存標的<select name="saved"><option value="">選擇標的</option></select></label>
+      <label class="full" id="putTickerRow">股票代號<input name="ticker" placeholder="例如 NVDA" maxlength="12" autocomplete="off" required></label>
+      <label class="check full" id="putEnabledRow"><input name="enabled" type="checkbox" checked>啟用這個標的</label>
+      <details class="full" open><summary>篩選門檻</summary>
+        <p class="hint">各條件可獨立開關。個別標的留白沿用全表預設，百分比以 10 代表 10%。</p>
+        <fieldset id="putFields" disabled></fieldset>
+      </details>
+      <button class="full" type="submit" disabled>儲存 Put 設定</button>
+      <div id="putStatus" class="full" role="status"></div>
+    </form>
+    <nav aria-label="Put 相關操作">
+      <a id="putSettings" target="_blank" rel="noopener" hidden>開啟 Put 設定表</a>
+      <a id="putDetail" target="_blank" rel="noopener" hidden>開啟 Put 期權鏈明細</a>
+      <a href="https://github.com/jack19839290/option-alerts/actions/workflows/long-call.yml" target="_blank" rel="noopener">手動掃描（Run workflow → Put）</a>
+    </nav>
+    <section class="panel" aria-label="Put 掃描結果">
+      <h2>Put 掃描結果</h2>
+      <p class="hint">儲存設定後，執行掃描才會重新套用門檻。</p>
+      <div class="controls">
+        <label>顯示<select id="putFilter">
+          <option value="preview">初篩通過・行情待確認</option><option value="official">符合條件</option>
+          <option value="pending">所有行情待確認</option><option value="failed">未符合</option><option value="all">全部</option>
+        </select></label>
+        <label>排序<select id="putSort">
+          <option value="best">最大到期跌幅</option><option value="premium">每口保費</option>
+          <option value="efficiency">避險效率</option><option value="liquidity">流動性（Spread、OI）</option>
+        </select></label>
+        <label>避險效率情境<select id="putDrop">
+          <option value="10">跌 10%</option><option value="20" selected>跌 20%</option>
+          <option value="30">跌 30%</option><option value="40">跌 40%</option>
+        </select></label>
+        <button type="button" id="putReload" class="quiet">重新載入結果</button>
+      </div>
+      <p id="putScanStatus" role="status"></p>
+      <div class="scroll" tabindex="0" aria-label="Put 結果表"><table id="putTable"></table></div>
+      <div class="controls">
+        <button type="button" id="putPrev" class="quiet" disabled>上一頁</button>
+        <span id="putPage"></span>
+        <button type="button" id="putNext" class="quiet" disabled>下一頁</button>
+      </div>
+    </section>
+    <section class="panel" id="putCompare" hidden>
+      <h2>合約並排比較</h2>
+      <p class="hint">Bid 是當下每口賣出價值的估計。四種下跌情境依各自到期日結算，金額為美元，已計 Ask 保費。Greeks 為模型估算，Vega 以 IV 變動 1 個百分點計。</p>
+      <button type="button" id="putClear" class="quiet">清除比較</button>
+      <div class="scroll" tabindex="0" aria-label="勾選合約比較表"><table id="putComparison"></table></div>
+    </section>
+  </section>
 </main>
 <script>
   const form = document.getElementById('scanForm');
@@ -194,5 +266,244 @@
     }).saveLongCallForm(payload);
   });
   load();
+</script>
+<script>
+  const byId = id => document.getElementById(id);
+  const putForm = byId('putForm');
+  const putInput = putForm.elements;
+  const putFields = byId('putFields');
+  const putSubmit = putForm.querySelector('button[type="submit"]');
+  const putDefaults = () => putInput.scope.value === 'defaults';
+  const putTicker = () => putDefaults() ? '' : putInput.ticker.value.trim().toUpperCase();
+  let putState, putFormRequest = 0, putResultRequest = 0, putTimer, putPage = 0;
+  let putSnapshot, putHeaders = [];
+  const putSelected = new Map();
+
+  function putStatus(message, type = '') {
+    byId('putStatus').textContent = message;
+    byId('putStatus').className = 'full ' + type;
+  }
+
+  function putBusy(busy) {
+    for (const name of ['scope', 'ticker', 'saved', 'enabled']) putInput[name].disabled = busy;
+    putFields.disabled = putSubmit.disabled = busy || !putState || (!putDefaults() && !putTicker());
+  }
+
+  function putApply(data) {
+    putState = data;
+    putInput.enabled.checked = data.enabled;
+    putInput.saved.replaceChildren(new Option('選擇標的', ''), ...data.tickers.map(([symbol, enabled]) =>
+      new Option(symbol + (enabled ? '' : '（停用）'), symbol)
+    ));
+    putInput.saved.value = putTicker();
+    putFields.replaceChildren();
+    let i = 0;
+    const asText = (value, unit) => value === '' ? '' : unit === '%' ? Number((value * 100).toPrecision(14)) : value;
+    for (const [name, fields] of data.filters) {
+      const toggle = document.createElement('select');
+      if (!putDefaults()) toggle.add(new Option('沿用全表（' + (data.defaults[i] ? '開' : '關') + '）', ''));
+      toggle.add(new Option('開啟', 'true'));
+      toggle.add(new Option('關閉', 'false'));
+      toggle.value = String(data.values[i++]);
+      putFields.append(putLabel(name + ' 篩選', toggle));
+      for (const [label, min, max, unit] of fields) {
+        const control = document.createElement('input');
+        control.type = 'number';
+        control.required = putDefaults();
+        control.step = unit === 'int' ? '1' : 'any';
+        control.min = asText(min, unit);
+        if (max !== null && max !== undefined) control.max = asText(max, unit);
+        control.dataset.percent = unit === '%' ? '1' : '';
+        control.placeholder = putDefaults() ? '' : '預設 ' + asText(data.defaults[i], unit);
+        control.value = asText(data.values[i++], unit);
+        putFields.append(putLabel(label + (unit === '%' ? '（%）' : ''), control));
+      }
+    }
+    for (const [id, url] of [['putSettings', data.settingsUrl], ['putDetail', data.detailUrl]]) {
+      byId(id).href = url;
+      byId(id).hidden = false;
+    }
+    putBusy(false);
+  }
+
+  function putLabel(text, control) {
+    const label = document.createElement('label');
+    label.textContent = text;
+    label.append(control);
+    return label;
+  }
+
+  function putLoad() {
+    clearTimeout(putTimer);
+    const symbol = putTicker();
+    const request = ++putFormRequest;
+    putState = null;
+    putBusy(false);
+    byId('putTickerRow').hidden = byId('putEnabledRow').hidden = putDefaults();
+    putInput.ticker.required = !putDefaults();
+    if (symbol && !/^[A-Z][A-Z0-9.-]{0,11}$/.test(symbol)) {
+      putStatus('請輸入有效的股票代號。', 'error');
+      return;
+    }
+    putStatus('正在讀取 Put 設定…');
+    if (symbol) putInput.ticker.value = symbol;
+    google.script.run.withSuccessHandler(data => {
+      if (request !== putFormRequest) return;
+      putApply(data);
+      putStatus(symbol ? (data.row ? symbol + ' 已儲存' : symbol + ' 尚未儲存') : '');
+    }).withFailureHandler(error => {
+      if (request === putFormRequest) putStatus(error.message || String(error), 'error');
+    }).loadPutForm(symbol);
+    putLoadResults(0);
+  }
+
+  putInput.ticker.addEventListener('input', () => {
+    clearTimeout(putTimer);
+    putFormRequest++;
+    putResultRequest++;
+    putState = null;
+    putBusy(false);
+    putTimer = setTimeout(putLoad, 400);
+  });
+  putInput.scope.addEventListener('change', putLoad);
+  putInput.saved.addEventListener('change', () => {
+    if (!putInput.saved.value) return;
+    putInput.ticker.value = putInput.saved.value;
+    putInput.scope.value = 'ticker';
+    putLoad();
+  });
+  putForm.addEventListener('submit', event => {
+    event.preventDefault();
+    if (putSubmit.disabled) return;
+    const symbol = putTicker();
+    const values = [...putFields.querySelectorAll('select,input')].map(control => {
+      if (control.value === '') return '';
+      if (control.tagName === 'SELECT') return control.value === 'true';
+      return Number(control.value) / (control.dataset.percent ? 100 : 1);
+    });
+    const payload = {ticker: symbol, enabled: putInput.enabled.checked, revision: putState.revision, values};
+    putBusy(true);
+    putStatus('正在儲存…');
+    google.script.run.withSuccessHandler(data => {
+      putApply(data);
+      putStatus((symbol || '全表預設') + '已儲存。下一次掃描將套用設定。', 'ok');
+    }).withFailureHandler(error => {
+      putBusy(false);
+      putStatus(error.message || String(error), 'error');
+    }).savePutForm(payload);
+  });
+
+  function putLoadResults(page) {
+    const request = ++putResultRequest;
+    const ticker = putTicker();
+    byId('putScanStatus').textContent = '正在讀取掃描結果…';
+    byId('putPrev').disabled = byId('putNext').disabled = true;
+    const options = {ticker, page, filter: byId('putFilter').value,
+      sort: byId('putSort').value, drop: Number(byId('putDrop').value)};
+    google.script.run.withSuccessHandler(data => {
+      if (request !== putResultRequest) return;
+      const snapshot = JSON.stringify([ticker, data.log[0], data.log[10]]);
+      if (putSnapshot !== snapshot) putSelected.clear();
+      putSnapshot = snapshot;
+      putHeaders = data.headers;
+      putPage = data.page;
+      const log = data.log;
+      const scan = log.length ? '最新掃描 ' + log[0] + '｜' + log[2] + '・' + log[3] +
+        '｜取得 ' + log[6] + '／' + log[5] + ' 個到期日。' + (log[3] === '失敗' ? '明細顯示前一批結果。' : '') +
+        (log[9] ? ' ' + log[9] : '') : '尚無掃描紀錄。';
+      byId('putScanStatus').textContent = scan + (ticker ? '' : ' 請先輸入或選擇標的。');
+      byId('putPage').textContent = data.total ? '第 ' + (putPage + 1) + '／' +
+        Math.ceil(data.total / data.pageSize) + ' 頁・' + data.total + ' 筆' : '目前無資料';
+      byId('putPrev').disabled = putPage === 0;
+      byId('putNext').disabled = (putPage + 1) * data.pageSize >= data.total;
+      putRenderRows(data.rows, options.drop);
+      putRenderComparison();
+    }).withFailureHandler(error => {
+      if (request !== putResultRequest) return;
+      byId('putScanStatus').textContent = error.message || String(error);
+      byId('putTable').replaceChildren();
+      byId('putPage').textContent = '';
+      putSelected.clear();
+      putRenderComparison();
+    }).loadPutResults(options);
+  }
+
+  const putCell = (row, name) => row[putHeaders.indexOf(name)];
+  function putDisplay(row, name) {
+    const value = putCell(row, name);
+    if (value === '' || value === undefined || value === null) {
+      return name === '最大到期跌幅' && putCell(row, 'K/S') > 1 ? '不適用' : '—';
+    }
+    if (typeof value !== 'number') return String(value);
+    return /保費率|跌幅|年化成本|K\/S|^IV$|Spread|報酬率|效率|利率|股息率/.test(name) ?
+      (value * 100).toFixed(2) + '%' : value.toLocaleString('en-US', {maximumFractionDigits: 5});
+  }
+
+  function putRow(table, values, header = false, rowHeader = false) {
+    const row = table.insertRow();
+    values.forEach((value, i) => {
+      const cell = document.createElement(header || (rowHeader && i === 0) ? 'th' : 'td');
+      if (value instanceof Node) cell.append(value);
+      else cell.textContent = value;
+      row.append(cell);
+    });
+  }
+
+  function putRenderRows(rows, drop) {
+    const table = byId('putTable');
+    table.replaceChildren();
+    if (!rows.length) return;
+    const columns = ['到期日', 'DTE', '履約價', '最大到期跌幅', '每口保費', '保費率', '年化成本',
+      'K/S', 'Delta', 'OI', 'Spread', '跌 ' + drop + '% 避險效率', '狀態', '篩選原因', '行情／資料註記'];
+    putRow(table, ['比較', ...columns], true);
+    for (const row of rows) {
+      const contract = putCell(row, '合約代號');
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.setAttribute('aria-label', '比較 ' + contract);
+      check.checked = putSelected.has(contract);
+      check.addEventListener('change', () => {
+        if (check.checked) putSelected.set(contract, row);
+        else putSelected.delete(contract);
+        putRenderComparison();
+      });
+      putRow(table, [check, ...columns.map(name => putDisplay(row, name))]);
+    }
+  }
+
+  function putRenderComparison() {
+    const table = byId('putComparison');
+    byId('putCompare').hidden = !putSelected.size;
+    table.replaceChildren();
+    if (!putSelected.size) return;
+    const rows = [...putSelected.values()];
+    putRow(table, ['指標', ...rows.map(row => putDisplay(row, '合約代號'))], true);
+    for (const name of putHeaders.slice(1)) {
+      if (name !== '合約代號') putRow(table, [name, ...rows.map(row => putDisplay(row, name))], false, true);
+    }
+    putRow(table, ['立即平倉估計損益', ...rows.map(row => {
+      const entry = putCell(row, '每口保費');
+      const exit = putCell(row, '每口 Bid 估值');
+      return typeof entry === 'number' && typeof exit === 'number' ? (exit - entry).toFixed(2) : '—';
+    })], false, true);
+  }
+
+  for (const id of ['putFilter', 'putSort', 'putDrop']) byId(id).addEventListener('change', () => putLoadResults(0));
+  byId('putReload').addEventListener('click', putLoad);
+  byId('putPrev').addEventListener('click', () => putLoadResults(putPage - 1));
+  byId('putNext').addEventListener('click', () => putLoadResults(putPage + 1));
+  byId('putClear').addEventListener('click', () => {
+    putSelected.clear();
+    byId('putTable').querySelectorAll('input[type="checkbox"]').forEach(check => { check.checked = false; });
+    putRenderComparison();
+  });
+  for (const strategy of ['call', 'put']) byId(strategy + 'Tab').addEventListener('click', () => {
+    const put = strategy === 'put';
+    byId('callPanel').hidden = put;
+    byId('putPanel').hidden = !put;
+    byId('callTab').setAttribute('aria-pressed', String(!put));
+    byId('putTab').setAttribute('aria-pressed', String(put));
+    if (put && !putFormRequest) putLoad();
+  });
 </script>
 </body></html>

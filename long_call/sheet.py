@@ -16,6 +16,8 @@ def row_data(row):
     for value in row:
         if value is None:
             cells.append({})
+        elif isinstance(value, bool):
+            cells.append({"userEnteredValue": {"boolValue": value}})
         elif isinstance(value, (int, float)):
             cells.append({"userEnteredValue": {"numberValue": value}})
         else:
@@ -24,27 +26,32 @@ def row_data(row):
 
 
 class LongCallSheet:
+    schema = SCHEMA
+    headers = SCHEMA["contracts"]
+    formats = ((6, 9, "PERCENT", "0.00%"), (9, 10, "NUMBER", "0.00"))
+
     def __init__(self, spreadsheet_id):
         self.id = spreadsheet_id
         self.api = SheetsRepository(spreadsheet_id).service.spreadsheets()
+        self.tabs = self.get_tabs()
+        if not {self.schema[key] for key in ("settings", "results", "detail", "log")} <= self.tabs.keys():
+            raise ValueError("試算表缺少掃描專用分頁")
+        ranges = [f"'{self.schema[key]}'!1:1" for key in ("results", "detail", "log")]
+        headers = self.api.values().batchGet(spreadsheetId=self.id, ranges=ranges).execute(num_retries=3)
+        expected = [self.headers, self.headers, self.schema["logs"]]
+        if [item.get("values", [[]])[0] for item in headers["valueRanges"]] != expected:
+            raise ValueError("掃描分頁的欄位名稱或順序不符")
+
+    def get_tabs(self):
         response = self.api.get(
             spreadsheetId=self.id, fields="sheets(properties(sheetId,title,gridProperties)"
             ",basicFilter)"
         ).execute(num_retries=3)
-        self.tabs = {tab["properties"]["title"]: tab for tab in response["sheets"]}
-        if not {SCHEMA[key] for key in ("settings", "results", "detail", "log")} <= self.tabs.keys():
-            raise ValueError("試算表缺少買入買權專用分頁")
-        ranges = [f"'{SCHEMA[key]}'!A1:{end}" for key, end in (
-            ("results", "U1"), ("detail", "U1"), ("log", "L1"),
-        )]
-        headers = self.api.values().batchGet(spreadsheetId=self.id, ranges=ranges).execute(num_retries=3)
-        expected = [SCHEMA["contracts"], SCHEMA["contracts"], SCHEMA["logs"]]
-        if [item.get("values", [[]])[0] for item in headers["valueRanges"]] != expected:
-            raise ValueError("買入買權分頁的欄位名稱或順序不符")
+        return {tab["properties"]["title"]: tab for tab in response["sheets"]}
 
     def read(self, key, ranges):
         return self.api.values().get(
-            spreadsheetId=self.id, range=f"'{SCHEMA[key]}'!{ranges}",
+            spreadsheetId=self.id, range=f"'{self.schema[key]}'!{ranges}",
             valueRenderOption="UNFORMATTED_VALUE",
         ).execute(num_retries=3).get("values", [])
 
@@ -76,7 +83,9 @@ class LongCallSheet:
     def publish(self, results, details, log_entry, log_count):
         requests = []
         for key, rows in (("results", results), ("detail", details), ("log", [log_entry])):
-            tab = self.tabs[SCHEMA[key]]
+            if rows is None:
+                continue
+            tab = self.tabs[self.schema[key]]
             props = tab["properties"]
             tab_id = props["sheetId"]
             height = props["gridProperties"]["rowCount"]
@@ -92,15 +101,13 @@ class LongCallSheet:
                     "rows": [row_data(log_entry)], "fields": "userEnteredValue",
                 }})
                 continue
-            width = len(SCHEMA["contracts"])
+            width = len(self.headers)
             requests.append({"updateCells": {
                 "range": {"sheetId": tab_id, "startRowIndex": 1, "endRowIndex": max(height, needed),
                           "startColumnIndex": 0, "endColumnIndex": width},
                 "rows": [row_data(row) for row in rows], "fields": "userEnteredValue",
             }})
-            for start_col, end_col, kind, pattern in (
-                (6, 9, "PERCENT", "0.00%"), (9, 10, "NUMBER", "0.00"),
-            ):
+            for start_col, end_col, kind, pattern in self.formats:
                 requests.append({"repeatCell": {
                     "range": {"sheetId": tab_id, "startRowIndex": 1, "endRowIndex": max(2, needed),
                               "startColumnIndex": start_col, "endColumnIndex": end_col},

@@ -179,6 +179,7 @@ class ChainSnapshot:
     dividend_yield: float
     quotes: list[OptionQuote] = field(default_factory=list)
     dividend_yield_note: str = ""
+    underlying_time: datetime | None = None
 
 
 @dataclass(slots=True, frozen=True)

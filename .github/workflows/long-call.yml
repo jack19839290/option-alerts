@@ -1,7 +1,16 @@
-name: Long Call close scan
+name: Long Call and Long Put scan
 
 on:
   workflow_dispatch:
+    inputs:
+      strategy:
+        description: Strategy to scan
+        type: choice
+        options:
+          - Both
+          - Call
+          - Put
+        default: Both
   schedule:
     - cron: '23 13,16 * * 1-5'
       timezone: America/New_York
@@ -31,9 +40,18 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
       - run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Scan calls
+        if: github.event_name == 'schedule' || inputs.strategy != 'Put'
         run: |
           if [ "$GITHUB_EVENT_NAME" = schedule ]; then
             python -m long_call.scan --close
           else
             python -m long_call.scan
+          fi
+      - name: Scan protective puts
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.strategy != 'Call') }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            python -m long_call.put_scan --close
+          else
+            python -m long_call.put_scan
           fi

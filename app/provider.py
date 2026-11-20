@@ -135,6 +135,14 @@ class YahooFinanceProvider:
             chain = ticker.option_chain(expiry.isoformat())
             underlying = chain.underlying or {}
             spot = self._underlying_price(ticker, underlying)
+            spot_time = None
+            for session in ("regular", "post", "pre"):
+                value = _safe_float(underlying.get(f"{session}MarketPrice"))
+                if value is not None and value > 0:
+                    raw_time = _safe_float(underlying.get(f"{session}MarketTime"))
+                    if raw_time is not None and 0 < raw_time < 4102444800:
+                        spot_time = datetime.fromtimestamp(raw_time, timezone.utc)
+                    break
             dividend_yield, dividend_yield_note = _select_dividend_yield(
                 underlying, self.default_dividend_yield
             )
@@ -148,6 +156,7 @@ class YahooFinanceProvider:
                 dividend_yield=dividend_yield,
                 quotes=quotes,
                 dividend_yield_note=dividend_yield_note,
+                underlying_time=spot_time,
             )
         except Exception as exc:
             if self._is_rate_limit(exc):
